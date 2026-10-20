@@ -1,0 +1,15 @@
+# This repo may be published later by renaming it, and git history would
+# publish everything ever committed. Keep private and local files out.
+
+# Deployment values, secrets and your EAs (see compose.yaml)
+.env
+.env.*
+*.key
+secrets/
+data/
+ea/
+!.env.example
+
+# Local-only material
+ignore/
+*.code-workspace
