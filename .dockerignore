@@ -1,0 +1,4 @@
+# Only root/ goes into the build context. Everything else stays out, above all
+# the local ignore/ folder, which holds trial data with saved logins.
+*
+!root/
