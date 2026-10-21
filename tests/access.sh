@@ -1,0 +1,371 @@
+#!/usr/bin/env bash
+# Access-layer tests for the mt5-desktop image.
+#
+# Each configuration runs the image on an internal Docker network, which has
+# no internet: MT5's first-start downloads fail at once, and the access layer
+# doesn't need MT5. Other containers of the same image probe it with curl and
+# openssl, so no host port is used, except by --host. Everything the script
+# starts is removed when it ends.
+#
+# Usage: tests/access.sh [--host] [image]
+#   --host  also run T15, host networking on the host's 127.0.0.1:3911. It
+#           binds a port on this machine, so it runs only when asked.
+#   image   defaults to mt5-desktop:dev.
+set -euo pipefail
+
+host_test=no
+if [[ "${1:-}" == --host ]]; then
+  host_test=yes
+  shift
+fi
+image="${1:-mt5-desktop:dev}"
+
+run="mt5-access-$$"
+net="$run-net"
+tmp="$(mktemp -d)"
+user=trader
+password='access-test-password-1'
+key='dGhlIHNhbXBsZSBub25jZQ=='
+passes=0
+failures=0
+
+cleanup() {
+  docker ps -aq --filter "name=^$run-" | xargs -r docker rm -f > /dev/null 2>&1 || true
+  docker network rm "$net" > /dev/null 2>&1 || true
+  rm -rf "$tmp"
+}
+trap cleanup EXIT
+
+pass() {
+  passes=$((passes + 1))
+  printf '  ok    %s\n' "$1"
+}
+fail() {
+  failures=$((failures + 1))
+  printf '  FAIL  %s\n' "$1"
+}
+# check <description> <expected> <actual>
+check() {
+  if [[ "$3" == "$2" ]]; then
+    pass "$1"
+  else
+    fail "$1: expected '$2', got '$3'"
+  fi
+}
+# check_true <description> <command...>
+check_true() {
+  local description="$1"
+  shift
+  if "$@" > /dev/null 2>&1; then
+    pass "$description"
+  else
+    fail "$description"
+  fi
+}
+
+# The compose example's hardening, so the tests see what users run.
+hardening=(
+  --memory 1g --cpus 1 --pids-limit 1024 --shm-size 256m
+  --security-opt no-new-privileges:true
+  --cap-drop ALL
+  --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER
+  --cap-add SETUID --cap-add SETGID --cap-add KILL
+  -e PUID=1000 -e PGID=1000 -e TZ=Etc/UTC -e "CUSTOM_USER=$user"
+)
+# A password file as echo writes it, with a line break at the end.
+printf '%s\n' "$password" > "$tmp/password"
+printf '%s' 'only8chr' > "$tmp/short"
+printf '%s' 'securepassword' > "$tmp/placeholder"
+: > "$tmp/docker.sock"
+with_password=(-v "$tmp/password:/run/secrets/password:ro" -e FILE__PASSWORD=/run/secrets/password)
+
+# start <network> <name> [docker run options...]
+start() {
+  local network="$1" name="$run-$2"
+  shift 2
+  docker run -d --name "$name" --network "$network" "${hardening[@]}" "$@" "$image" > /dev/null
+}
+
+# ready <name>: waits until Selkies' socket exists and nginx answers the
+# health-check URL (401, or 403 when TRUSTED_PROXIES leaves out 127.0.0.1).
+ready() {
+  local name="$run-$1" status _
+  for _ in $(seq 1 90); do
+    if [[ "$(docker inspect -f '{{.State.Running}}' "$name" 2> /dev/null)" != true ]]; then
+      fail "$1 stopped: $(docker logs "$name" 2>&1 | grep 'mt5-access' | tr '\n' ' ')"
+      return 1
+    fi
+    if docker exec "$name" test -S /run/selkies/selkies.sock 2> /dev/null; then
+      status="$(docker exec "$name" sh -c 'curl -sk -o /dev/null -w "%{http_code}" --max-time 5 "$(cat /run/mt5/health-url)"' 2> /dev/null || true)"
+      if [[ "$status" == 401 || "$status" == 403 ]]; then
+        return 0
+      fi
+    fi
+    sleep 1
+  done
+  fail "$1 wasn't ready after 90 s"
+  return 1
+}
+
+# refused <description> <text in the REFUSED line> [docker run options...]:
+# the container must stop, and its log must name the reason.
+refused() {
+  local description="$1" text="$2" name="$run-refused" state="" reason _
+  shift 2
+  docker rm -f "$name" > /dev/null 2>&1 || true
+  docker run -d --name "$name" --network "$net" "${hardening[@]}" "$@" "$image" > /dev/null
+  for _ in $(seq 1 60); do
+    state="$(docker inspect -f '{{.State.Status}}' "$name")"
+    [[ "$state" == exited ]] && break
+    sleep 1
+  done
+  reason="$(docker logs "$name" 2>&1 | grep -F '[mt5-access] REFUSED:' || true)"
+  if [[ "$state" == exited ]] && grep -qF -- "$text" <<< "$reason"; then
+    pass "$description"
+  else
+    fail "$description: state '$state', reason '${reason:-none}'"
+  fi
+  docker rm -f "$name" > /dev/null 2>&1 || true
+}
+
+# code [--from <probe>] <curl options and URL...>: the HTTP status, 000 when
+# nothing answers.
+code() {
+  local from=probe
+  if [[ "$1" == --from ]]; then
+    from="$2"
+    shift 2
+  fi
+  docker exec "$run-$from" curl -sk --http1.1 -o /dev/null -w '%{http_code}' --max-time 5 "$@" || true
+}
+
+# ws <host:port> <path> <origin>: the status of a stream handshake.
+ws() {
+  code -u "$user:$password" --max-time 3 \
+    -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+    -H 'Sec-WebSocket-Version: 13' -H "Sec-WebSocket-Key: $key" \
+    -H "Origin: $3" "https://$1$2"
+}
+
+# security_headers <curl options and URL...>: succeeds when all four are there.
+security_headers() {
+  local headers
+  headers="$(docker exec "$run-probe" curl -sk -D - -o /dev/null --max-time 5 "$@" | tr -d '\r')"
+  grep -qx "Content-Security-Policy: frame-ancestors 'none'" <<< "$headers" &&
+    grep -qx 'X-Frame-Options: DENY' <<< "$headers" &&
+    grep -qx 'X-Content-Type-Options: nosniff' <<< "$headers" &&
+    grep -qx 'Referrer-Policy: no-referrer' <<< "$headers"
+}
+
+# logged <name> <text>: succeeds when the container's log has the text. The
+# log is read in full first: under pipefail, "docker logs | grep -q" can fail
+# when grep stops early and docker logs gets SIGPIPE.
+logged() {
+  local logs
+  logs="$(docker logs "$run-$1" 2>&1)"
+  grep -qF -- "$2" <<< "$logs"
+}
+
+# listeners <name>: the container's listening TCP and UDP sockets, as
+# hexadecimal address:port, without Docker's DNS server on 127.0.0.11.
+listeners() {
+  docker exec "$run-$1" sh -c '
+    for f in tcp tcp6; do awk "NR > 1 && \$4 == \"0A\" { print \$2 }" /proc/net/$f; done
+    for f in udp udp6; do awk "NR > 1 { print \$2 }" /proc/net/$f; done' |
+    grep -v '^0B00007F:' | sort -u | tr '\n' ' ' | sed 's/ $//'
+}
+
+ip_of() {
+  docker inspect -f "{{(index .NetworkSettings.Networks \"$net\").IPAddress}}" "$run-$1"
+}
+
+echo "Image: $image"
+docker network create --internal "$net" > /dev/null
+for probe in probe probe2; do
+  docker run -d --name "$run-$probe" --network "$net" --memory 256m \
+    --cap-drop ALL --security-opt no-new-privileges:true \
+    --entrypoint sleep "$image" infinity > /dev/null
+done
+
+echo "T1, T10: settings that must stop the container"
+refused "T1: no password" "no password"
+refused "T1: 8 characters" "shorter than 12 characters" \
+  -v "$tmp/short:/run/secrets/password:ro" -e FILE__PASSWORD=/run/secrets/password
+refused "T1: unreadable password file" "can't be read" -e FILE__PASSWORD=/run/secrets/missing
+refused "T1: placeholder" "well-known placeholder" \
+  -v "$tmp/placeholder:/run/secrets/password:ro" -e FILE__PASSWORD=/run/secrets/password
+refused "T10: SELKIES_ALLOWED_ORIGINS=*" "includes '*'" "${with_password[@]}" -e 'SELKIES_ALLOWED_ORIGINS=*'
+refused "T10: TRUSTED_PROXIES=0.0.0.0/0" "covers every address" "${with_password[@]}" -e TRUSTED_PROXIES=0.0.0.0/0
+refused "T10: TRUSTED_PROXIES=::/0" "covers every address" "${with_password[@]}" -e TRUSTED_PROXIES=::/0
+refused "T10: TRUSTED_PROXIES that isn't an address" "isn't an IP address" "${with_password[@]}" -e TRUSTED_PROXIES=proxy.example
+refused "T10: DEV_MODE" "DEV_MODE is set" "${with_password[@]}" -e DEV_MODE=1
+refused "T10: PIXELFLUX_WAYLAND=true" "PIXELFLUX_WAYLAND=true" "${with_password[@]}" -e PIXELFLUX_WAYLAND=true
+refused "T10: SELKIES_MODE=webrtc" "WebRTC streaming" "${with_password[@]}" -e SELKIES_MODE=webrtc
+refused "T10: SELKIES_ENABLE_DUAL_MODE=true" "WebRTC streaming" "${with_password[@]}" -e SELKIES_ENABLE_DUAL_MODE=true
+refused "T10: SELKIES_COMPUTER_USE_BIND" "SELKIES_COMPUTER_USE_BIND" "${with_password[@]}" -e SELKIES_COMPUTER_USE_BIND=8090
+refused "T10: another SELKIES_UNIX_SOCKET" "SELKIES_UNIX_SOCKET must stay" "${with_password[@]}" -e SELKIES_UNIX_SOCKET=/tmp/other.sock
+refused "T10: the Docker socket mounted" "Docker socket is mounted" "${with_password[@]}" -v "$tmp/docker.sock:/var/run/docker.sock:ro"
+refused "T10: SYS_ADMIN (privileged)" "CAP_SYS_ADMIN" "${with_password[@]}" --cap-add SYS_ADMIN
+refused "T10: only TLS_CERT_FILE" "only one of TLS_CERT_FILE" "${with_password[@]}" -e TLS_CERT_FILE=/config/ssl/cert.pem
+refused "T10: LISTEN_ADDRESS that isn't an address" "LISTEN_ADDRESS must be one IP address" "${with_password[@]}" -e LISTEN_ADDRESS=all
+refused "T10: SUBFOLDER without slashes" "SUBFOLDER must start and end with '/'" "${with_password[@]}" -e SUBFOLDER=mt5
+
+echo "Defaults (T2, T3, T5-T8, T13, T14, T16, T17)"
+start "$net" main "${with_password[@]}"
+if ready main; then
+  t="$run-main:3001"
+  check "T2: no login" 401 "$(code "https://$t/")"
+  check "T2: login" 200 "$(code -u "$user:$password" "https://$t/")"
+  check "T2: wrong password" 401 "$(code -u "$user:${password}x" "https://$t/")"
+  check_true "T2: the four headers on a 401" security_headers "https://$t/"
+  check_true "T2: the four headers on a 200" security_headers -u "$user:$password" "https://$t/"
+  check_true "T2: a password file ending in a line break works, and the log says so" logged main "ends in a line break"
+  check "T3: nothing on port 3000" 000 "$(code "http://$run-main:3000/")"
+  check "T4: without TRUSTED_PROXIES, a second address also gets the login" 401 "$(code --from probe2 "https://$t/")"
+  check "T5: stream from its own origin" 101 "$(ws "$t" /api/websockets "https://$t")"
+  check "T5: stream from another port on the same host" 403 "$(ws "$t" /api/websockets "https://$run-main:3002")"
+  check "T5: stream from another site" 403 "$(ws "$t" /api/websockets https://evil.example)"
+  check "T6: POST /api/recording from another site" 403 \
+    "$(code -u "$user:$password" -X POST -H 'Origin: https://evil.example' "https://$t/api/recording")"
+  check "T7: /devmode" 404 "$(code -u "$user:$password" "https://$t/devmode")"
+  check "T7: /pelorus/" 404 "$(code -u "$user:$password" "https://$t/pelorus/")"
+  check "T8: POST /api/upload with transfers off" 403 \
+    "$(code -u "$user:$password" -X POST -H "Origin: https://$t" -F 'file=@/etc/hostname' "https://$t/api/upload")"
+  check "T8: GET /api/files/ with transfers off" 403 \
+    "$(code -u "$user:$password" -H "Origin: https://$t" "https://$t/api/files/")"
+  if docker exec -u abc "$run-main" sudo -n true > /dev/null 2>&1; then
+    fail "T13: sudo works for the desktop user"
+  else
+    pass "T13: no sudo for the desktop user"
+  fi
+  check "T13: runnable terminals" "" "$(docker exec -u abc "$run-main" sh -c '
+    for n in xterm st stterm uxterm lxterminal gnome-terminal konsole xfce4-terminal terminator foot weston-terminal; do
+      p=$(command -v "$n" 2> /dev/null) && [ -x "$p" ] && echo "$n"
+    done; true')"
+  check "T13: terminals in the menu" 0 \
+    "$(docker exec "$run-main" sh -c 'grep -c -i -E "xterm|terminal|konsole|foot" /config/.config/openbox/menu.xml || true')"
+  env_json="$(docker inspect -f '{{json .Config.Env}}' "$run-main")"
+  check_true "T14: docker inspect shows the password file's path" grep -qF 'FILE__PASSWORD=/run/secrets/password' <<< "$env_json"
+  if grep -qF -- "$password" <<< "$env_json"; then
+    fail "T14: docker inspect shows the password"
+  else
+    pass "T14: docker inspect doesn't show the password"
+  fi
+  check "T14: the plain-text password left the startup environment" no \
+    "$(docker exec "$run-main" sh -c '[ -e /run/s6/container_environment/PASSWORD ] && echo yes || echo no')"
+  check "T14: password file owner and mode" "640 root:www-data" "$(docker exec "$run-main" stat -c '%a %U:%G' /etc/nginx/.htpasswd)"
+  check "T14: password hash type" "$user:\$6\$" "$(docker exec "$run-main" cut -c1-$((${#user} + 4)) /etc/nginx/.htpasswd)"
+  selkies_pid="$(docker exec "$run-main" pgrep -o -f 'selkies --addr')"
+  check "T14: Selkies' environment has no PASSWORD" 0 \
+    "$(docker exec -u abc "$run-main" sh -c "tr '\0' '\n' < /proc/$selkies_pid/environ | grep -c '^PASSWORD=' || true")"
+  check "T16: listening sockets (only HTTPS on 3001)" "00000000:0BB9" "$(listeners main)"
+  check "T16: listening abstract sockets" 0 \
+    "$(docker exec "$run-main" sh -c 'awk "NR > 1 && \$4 == \"00010000\" && \$8 ~ /^@/" /proc/net/unix | wc -l')"
+  check "T16: Selkies' socket folder and socket" "2750 abc:mt5sock 775 abc:mt5sock" \
+    "$(docker exec "$run-main" stat -c '%a %U:%G' /run/selkies /run/selkies/selkies.sock | tr '\n' ' ' | sed 's/ $//')"
+  check "T17: switching the stream to WebRTC" 403 \
+    "$(code -u "$user:$password" -X POST -H "Origin: https://$t" -H 'Content-Type: application/json' -d '{"mode": "webrtc"}' "https://$t/api/switch")"
+  check "WP4: health-check URL" "https://127.0.0.1:3001/" "$(docker exec "$run-main" cat /run/mt5/health-url)"
+  code -A mt5-healthcheck "https://$t/" > /dev/null
+  code -A access-test-agent -u "$user:$password" "https://$t/" > /dev/null
+  agent_line="$(docker logs "$run-main" 2>&1 | grep -F access-test-agent || true)"
+  check_true "Q5: a request is logged with its user and status" grep -q "user=$user \[.*\" 200 " <<< "$agent_line"
+  if logged main mt5-healthcheck; then
+    fail "Q5: the health check is logged"
+  else
+    pass "Q5: the health check isn't logged"
+  fi
+  docker restart "$run-main" > /dev/null
+  if ready main; then
+    check "Restart: the login still works" 200 "$(code -u "$user:$password" "https://$t/")"
+    check "Restart: the plain-text password left the startup environment again" no \
+      "$(docker exec "$run-main" sh -c '[ -e /run/s6/container_environment/PASSWORD ] && echo yes || echo no')"
+  fi
+fi
+docker rm -f "$run-main" > /dev/null
+
+echo "TRUSTED_PROXIES (T3, T4)"
+start "$net" proxies "${with_password[@]}" -e "TRUSTED_PROXIES=$(ip_of probe)"
+if ready proxies; then
+  t="$run-proxies:3001"
+  check "T4: the listed proxy without a login" 401 "$(code "https://$t/")"
+  check "T4: the listed proxy with a login" 200 \
+    "$(code -u "$user:$password" -H 'X-Forwarded-For: 203.0.113.7' "https://$t/")"
+  check "T4: an unlisted address" 403 "$(code --from probe2 -u "$user:$password" "https://$t/")"
+  check_true "T4: the listed proxy's X-Forwarded-For is logged" logged proxies "forwarded=203.0.113.7"
+  check "T3: nothing on port 3000" 000 "$(code "http://$run-proxies:3000/")"
+fi
+docker rm -f "$run-proxies" > /dev/null
+
+echo "CUSTOM_PORT and PASSWORD (T3, warnings)"
+start "$net" plain -e CUSTOM_PORT=3000 -e "PASSWORD=$password"
+if ready plain; then
+  check "T3: nothing on port 3000 with CUSTOM_PORT=3000" 000 "$(code "http://$run-plain:3000/")"
+  check_true "CUSTOM_PORT is warned about" logged plain "CUSTOM_PORT is set, but there is no plain HTTP"
+  check_true "PASSWORD given directly is warned about" logged plain "PASSWORD is set directly"
+  check "the login works with PASSWORD" 200 "$(code -u "$user:$password" "https://$run-plain:3001/")"
+fi
+docker rm -f "$run-plain" > /dev/null
+
+echo "TLS_CERT_FILE and TLS_KEY_FILE (T9)"
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=mt5-access-test \
+  -keyout "$tmp/tls.key" -out "$tmp/tls.crt" 2> /dev/null
+start "$net" tls "${with_password[@]}" \
+  -v "$tmp/tls.crt:/run/secrets/tls.crt:ro" -v "$tmp/tls.key:/run/secrets/tls.key:ro" \
+  -e TLS_CERT_FILE=/run/secrets/tls.crt -e TLS_KEY_FILE=/run/secrets/tls.key
+if ready tls; then
+  # s_client prints "New, <protocol>, Cipher is <cipher>" for a handshake that
+  # worked, and "New, (NONE), Cipher is (NONE)" for one that didn't. Its
+  # session summary names the attempted protocol either way.
+  tls() {
+    docker exec "$run-probe" sh -c "echo | openssl s_client -connect $run-tls:3001 $1 2>&1" || true
+  }
+  check_true "T9: the given certificate is served" grep -q 'subject=.*CN *= *mt5-access-test' <<< "$(tls '')"
+  check_true "T9: TLS 1.2 accepted" grep -q '^New, TLSv1.2, Cipher is [A-Z]' <<< "$(tls -tls1_2)"
+  check_true "T9: TLS 1.3 accepted" grep -q '^New, TLSv1.3, Cipher is [A-Z]' <<< "$(tls -tls1_3)"
+  check_true "T9: TLS 1.1 refused" grep -q '^New, (NONE), Cipher is (NONE)' <<< "$(tls '-tls1_1 -cipher DEFAULT@SECLEVEL=0')"
+fi
+docker rm -f "$run-tls" > /dev/null
+
+echo "A VPN sidecar's network (T11)"
+docker run -d --name "$run-tailnet" --network "$net" --cap-add NET_ADMIN --memory 128m --entrypoint sh "$image" \
+  -c 'ip link add tailscale0 type dummy && ip link set tailscale0 up && exec sleep infinity' > /dev/null
+start "container:$run-tailnet" sidecar "${with_password[@]}"
+if ready sidecar; then
+  check_true "T11: a tailscale0 interface isn't taken for host networking" logged sidecar "Host networking: no"
+  check "T11: reachable through the sidecar" 401 "$(code "https://$run-tailnet:3001/")"
+fi
+docker rm -f "$run-sidecar" "$run-tailnet" > /dev/null
+
+echo "SUBFOLDER=/mt5/ (T12)"
+start "$net" sub "${with_password[@]}" -e SUBFOLDER=/mt5/
+if ready sub; then
+  t="$run-sub:3001"
+  check "T12: the desktop under /mt5/" 200 "$(code -u "$user:$password" "https://$t/mt5/")"
+  check "T12: the stream under /mt5/" 101 "$(ws "$t" /mt5/api/websockets "https://$t")"
+  check "T12: outside /mt5/" 404 "$(code -u "$user:$password" "https://$t/")"
+fi
+docker rm -f "$run-sub" > /dev/null
+
+if [[ "$host_test" == yes ]]; then
+  echo "Host networking (T15), on this machine's 127.0.0.1:3911"
+  before="$(ss -Hltnu | awk '{ print $1, $5 }' | sort)"
+  abstract_before="$(ss -Hxl | grep -c '@/tmp/.X11-unix' || true)"
+  docker run -d --name "$run-host" --network host "${hardening[@]}" "${with_password[@]}" \
+    -e CUSTOM_HTTPS_PORT=3911 "$image" > /dev/null
+  if ready host; then
+    after="$(ss -Hltnu | awk '{ print $1, $5 }' | sort)"
+    abstract_after="$(ss -Hxl | grep -c '@/tmp/.X11-unix' || true)"
+    check "T15: the only new listener on this machine" "tcp 127.0.0.1:3911" \
+      "$(comm -13 <(echo "$before") <(echo "$after") | tr '\n' ' ' | sed 's/ $//')"
+    check "T15: no new abstract X socket" "$abstract_before" "$abstract_after"
+    check_true "T15: the log warns about host networking" logged host "host networking: only nginx listens"
+    check "T15: login on 127.0.0.1:3911" 401 \
+      "$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 https://127.0.0.1:3911/ || true)"
+  fi
+  docker rm -f "$run-host" > /dev/null
+fi
+
+echo
+echo "$passes passed, $failures failed"
+(( failures == 0 ))

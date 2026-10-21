@@ -1,0 +1,73 @@
+# mt5-desktop's nginx site. init-mt5-access renders it at every start, over
+# the base's site, and fills in the MT5_* placeholders and the files in
+# /etc/nginx/mt5/. HTTPS only: there is no plain-HTTP server.
+
+# Requests from an address in TRUSTED_PROXIES get their X-Forwarded-For logged.
+# Nothing else uses that header, so the access checks below always judge the
+# connecting address.
+geo $mt5_trusted_proxy {
+  default 0;
+  include /etc/nginx/mt5/trusted-proxies.geo;
+}
+map $mt5_trusted_proxy $mt5_forwarded_for {
+  1       $http_x_forwarded_for;
+  default "-";
+}
+
+# The health check isn't logged.
+map $http_user_agent $mt5_log_request {
+  mt5-healthcheck 0;
+  default         1;
+}
+
+log_format mt5 '$remote_addr forwarded=$mt5_forwarded_for user=$remote_user '
+               '[$time_local] "$request" $status $body_bytes_sent "$http_user_agent"';
+
+server {
+  listen MT5_LISTEN ssl;
+  ssl_certificate     MT5_CERT;
+  ssl_certificate_key MT5_KEY;
+
+  # TRUSTED_PROXIES: when set, "allow" each entry, then "deny all".
+  include /etc/nginx/mt5/allow.conf;
+
+  auth_basic           "Login";
+  auth_basic_user_file /etc/nginx/.htpasswd;
+
+  # On every response, errors included. No location adds headers of its own,
+  # because nginx would then drop these there.
+  add_header Content-Security-Policy "frame-ancestors 'none'" always;
+  add_header X-Frame-Options "DENY" always;
+  add_header X-Content-Type-Options "nosniff" always;
+  add_header Referrer-Policy "no-referrer" always;
+
+  access_log /dev/stdout mt5 if=$mt5_log_request;
+  error_log  /dev/stderr error;
+
+  # Anything outside SUBFOLDER, when SUBFOLDER isn't "/".
+  include /etc/nginx/mt5/outside-subfolder.conf;
+
+  location MT5_SUBFOLDER {
+    alias /usr/share/selkies/web/;
+    index index.html index.htm;
+    try_files $uri $uri/ =404;
+  }
+
+  # Selkies, the stream included, on its socket file.
+  location MT5_SUBFOLDERapi {
+    proxy_set_header        Upgrade $http_upgrade;
+    proxy_set_header        Connection "upgrade";
+    proxy_set_header        Host $http_host;
+    proxy_set_header        X-Real-IP $remote_addr;
+    proxy_set_header        X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header        X-Forwarded-Proto $scheme;
+    proxy_http_version      1.1;
+    proxy_read_timeout      3600s;
+    proxy_send_timeout      3600s;
+    proxy_connect_timeout   3600s;
+    proxy_buffering         off;
+    proxy_request_buffering off;
+    client_max_body_size    0;
+    proxy_pass              http://unix:MT5_SOCKET:;
+  }
+}
