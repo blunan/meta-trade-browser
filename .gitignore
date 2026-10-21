@@ -1,9 +1,10 @@
 # This repo may be published later by renaming it, and git history would
 # publish everything ever committed. Keep private and local files out.
 
-# Deployment values, secrets and your EAs (see compose.yaml)
+# Deployment values, secrets and your EAs (see compose.yaml and the README)
 .env
 .env.*
+compose.override.yaml
 *.key
 secrets/
 data/
