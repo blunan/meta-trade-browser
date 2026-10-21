@@ -195,6 +195,28 @@ ip_of() {
   docker inspect -f "{{(index .NetworkSettings.Networks \"$net\").IPAddress}}" "$run-$1"
 }
 
+# cert_field <name> <openssl x509 options...>: one field of the container's own
+# certificate, the value only.
+cert_field() {
+  docker exec "$run-$1" openssl x509 -in /config/ssl/cert.pem -noout "${@:2}" | tail -n 1 | sed 's/^ *//'
+}
+
+# cert_days <name>: how many days the container's own certificate is valid.
+cert_days() {
+  docker exec "$run-$1" sh -c '
+    s=$(date -d "$(openssl x509 -in /config/ssl/cert.pem -noout -startdate | cut -d= -f2)" +%s)
+    e=$(date -d "$(openssl x509 -in /config/ssl/cert.pem -noout -enddate | cut -d= -f2)" +%s)
+    echo $(((e - s) / 86400))'
+}
+
+# trusted <URL> <curl options...>: the HTTP status with the probe trusting
+# only /tmp/main.pem, the main container's own certificate. 000 when the
+# certificate isn't accepted for that name.
+trusted() {
+  docker exec "$run-probe" curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+    --cacert /tmp/main.pem "${@:2}" "$1" || true
+}
+
 echo "Image: $image"
 docker network create --internal "$net" > /dev/null
 for probe in probe probe2; do
@@ -227,7 +249,7 @@ refused "T10: only TLS_CERT_FILE" "only one of TLS_CERT_FILE" "${with_password[@
 refused "T10: LISTEN_ADDRESS that isn't an address" "LISTEN_ADDRESS must be one IP address" "${with_password[@]}" -e LISTEN_ADDRESS=all
 refused "T10: SUBFOLDER without slashes" "SUBFOLDER must start and end with '/'" "${with_password[@]}" -e SUBFOLDER=mt5
 
-echo "Defaults (T2, T3, T5-T8, T13, T14, T16, T17, T19)"
+echo "Defaults (T2, T3, T5-T8, T13, T14, T16, T17, T19, T20)"
 start "$net" main "${with_password[@]}"
 if ready main; then
   t="$run-main:3001"
@@ -280,11 +302,27 @@ if ready main; then
   selkies_pid="$(docker exec "$run-main" pgrep -o -f 'selkies --addr')"
   check "T14: Selkies' environment has no PASSWORD" 0 \
     "$(docker exec -u abc "$run-main" sh -c "tr '\0' '\n' < /proc/$selkies_pid/environ | grep -c '^PASSWORD=' || true")"
-  check "T19: Selkies runs without its own login, sound, microphone, webcam, or audio and video settings" \
-    "SELKIES_AUDIO_ENABLED=false|locked SELKIES_ENABLE_BASIC_AUTH=false SELKIES_MICROPHONE_ENABLED=false|locked SELKIES_UI_SIDEBAR_SHOW_AUDIO_SETTINGS=false|locked SELKIES_UI_SIDEBAR_SHOW_VIDEO_SETTINGS=false|locked SELKIES_WEBCAM_ENABLED=false|locked" \
+  check "T19: Selkies runs with sound, but without its own login, microphone, webcam, or audio and video settings" \
+    "SELKIES_AUDIO_ENABLED=true SELKIES_ENABLE_BASIC_AUTH=false SELKIES_MICROPHONE_ENABLED=false|locked SELKIES_UI_SIDEBAR_SHOW_AUDIO_SETTINGS=false|locked SELKIES_UI_SIDEBAR_SHOW_VIDEO_SETTINGS=false|locked SELKIES_WEBCAM_ENABLED=false|locked" \
     "$(docker exec -u abc "$run-main" sh -c "tr '\0' '\n' < /proc/$selkies_pid/environ |
       grep -E '^SELKIES_((AUDIO|MICROPHONE|WEBCAM)_ENABLED|ENABLE_BASIC_AUTH|UI_SIDEBAR_SHOW_(AUDIO|VIDEO)_SETTINGS)=' |
       sort | paste -s -d ' '")"
+  check "T20: the container's own certificate is issued to" "subject=O=mt5-desktop, CN=localhost" \
+    "$(cert_field main -subject)"
+  check "T20: ...for these names only" "DNS:localhost, IP Address:127.0.0.1, IP Address:0:0:0:0:0:0:0:1" \
+    "$(cert_field main -ext subjectAltName)"
+  check "T20: ...and can't sign others" "CA:FALSE" "$(cert_field main -ext basicConstraints)"
+  check "T20: ...for TLS servers only" "TLS Web Server Authentication" "$(cert_field main -ext extendedKeyUsage)"
+  check "T20: ...valid for 825 days" 825 "$(cert_days main)"
+  check_true "T20: the log says it was made" logged main "[mt5-cert] Made the desktop's own certificate"
+  docker exec "$run-main" cat /config/ssl/cert.pem | docker exec -i "$run-probe" sh -c 'cat > /tmp/main.pem'
+  main_ip="$(ip_of main)"
+  check "T20: trusted, it's accepted for localhost" 401 \
+    "$(trusted "https://localhost:3001/" --resolve "localhost:3001:$main_ip")"
+  check "T20: trusted, it's accepted for 127.0.0.1" 401 \
+    "$(trusted "https://127.0.0.1:3001/" --connect-to "127.0.0.1:3001:$main_ip:3001")"
+  check "T20: trusted, it's refused for any other name" 000 \
+    "$(trusted "https://mt5.example.com:3001/" --resolve "mt5.example.com:3001:$main_ip")"
   check "T16: listening sockets (only HTTPS on 3001)" "00000000:0BB9" "$(listeners main)"
   check "T16: listening abstract sockets" 0 \
     "$(docker exec "$run-main" sh -c 'awk "NR > 1 && \$4 == \"00010000\" && \$8 ~ /^@/" /proc/net/unix | wc -l')"
@@ -312,11 +350,18 @@ if ready main; then
   else
     pass "Q5: health checks aren't logged"
   fi
+  # The certificate the base makes, as its init-nginx makes it.
+  docker exec -u abc "$run-main" openssl req -new -x509 -days 3650 -nodes \
+    -out /config/ssl/cert.pem -keyout /config/ssl/cert.key \
+    -subj "/C=US/ST=CA/L=Carlsbad/O=Linuxserver.io/OU=LSIO Server/CN=*" > /dev/null 2>&1
   docker restart "$run-main" > /dev/null
   if ready main; then
     check "Restart: the login still works" 200 "$(code -u "$user:$password" "https://$t/")"
     check "Restart: the plain-text password left the startup environment again" no \
       "$(docker exec "$run-main" sh -c '[ -e /run/s6/container_environment/PASSWORD ] && echo yes || echo no')"
+    check "T20: the base's certificate is replaced at a start" "subject=O=mt5-desktop, CN=localhost" \
+      "$(cert_field main -subject)"
+    check_true "T20: the log says so" logged main "[mt5-cert] Replaced the base image's certificate"
   fi
 fi
 docker rm -f "$run-main" > /dev/null
@@ -334,7 +379,7 @@ if ready proxies; then
 fi
 docker rm -f "$run-proxies" > /dev/null
 
-echo "File transfers on (T18), and SELKIES_ENABLE_BASIC_AUTH empty (T19)"
+echo "File transfers on (T18), SELKIES_ENABLE_BASIC_AUTH empty (T19), a certificate near its expiry (T20)"
 start "$net" files "${with_password[@]}" -e SELKIES_FILE_TRANSFERS=upload,download -e SELKIES_ENABLE_BASIC_AUTH=
 if ready files; then
   t="$run-files:3001"
@@ -348,6 +393,14 @@ if ready files; then
     security_headers -u "$user:$password" "https://$t/api/files/"
   check "T18: download" "$(docker exec "$run-probe" cat /etc/hostname)" \
     "$(docker exec "$run-probe" curl -sk --max-time 5 -u "$user:$password" "https://$t/api/files/access-test.txt" || true)"
+  # The container's own certificate, 10 days from expiry.
+  docker exec -u abc "$run-files" openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -noenc -days 10 \
+    -subj /O=mt5-desktop/CN=localhost -out /config/ssl/cert.pem -keyout /config/ssl/cert.key > /dev/null 2>&1
+  docker restart "$run-files" > /dev/null
+  if ready files; then
+    check "T20: a start in its last 30 days renews it" 825 "$(cert_days files)"
+    check_true "T20: the log says so" logged files "[mt5-cert] Renewed the desktop's own certificate"
+  fi
 fi
 docker rm -f "$run-files" > /dev/null
 
@@ -361,7 +414,7 @@ if ready plain; then
 fi
 docker rm -f "$run-plain" > /dev/null
 
-echo "TLS_CERT_FILE and TLS_KEY_FILE (T9)"
+echo "TLS_CERT_FILE and TLS_KEY_FILE (T9), a certificate of your own in /config/ssl (T20)"
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=mt5-access-test \
   -keyout "$tmp/tls.key" -out "$tmp/tls.crt" 2> /dev/null
 start "$net" tls "${with_password[@]}" \
@@ -378,6 +431,14 @@ if ready tls; then
   check_true "T9: TLS 1.2 accepted" grep -q '^New, TLSv1.2, Cipher is [A-Z]' <<< "$(tls -tls1_2)"
   check_true "T9: TLS 1.3 accepted" grep -q '^New, TLSv1.3, Cipher is [A-Z]' <<< "$(tls -tls1_3)"
   check_true "T9: TLS 1.1 refused" grep -q '^New, (NONE), Cipher is (NONE)' <<< "$(tls '-tls1_1 -cipher DEFAULT@SECLEVEL=0')"
+  # A certificate of your own in /config/ssl.
+  docker exec -u abc "$run-tls" sh -c 'cp /run/secrets/tls.crt /config/ssl/cert.pem && cp /run/secrets/tls.key /config/ssl/cert.key'
+  own="$(docker exec "$run-tls" sha256sum /config/ssl/cert.pem)"
+  docker restart "$run-tls" > /dev/null
+  if ready tls; then
+    check "T20: a certificate of your own in /config/ssl is left alone" "$own" \
+      "$(docker exec "$run-tls" sha256sum /config/ssl/cert.pem)"
+  fi
 fi
 docker rm -f "$run-tls" > /dev/null
 

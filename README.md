@@ -71,6 +71,8 @@ ssh -N -L 3001:127.0.0.1:3001 you@your-server
 
 Then browse to `https://localhost:3001`. The browser warns about the certificate, because the container made its own; accept it. Sign in as `trader` with demo's password. While MT5 is still installing, the desktop shows a small *Installing MetaTrader 5* window.
 
+To stop the warning for good, trust that certificate on your computer: copy `data/demo/ssl/cert.pem` from the server, and add it to your trusted certificates (on macOS, open it in Keychain Access and set it to *Always Trust*). It's issued to `localhost` and `127.0.0.1` only, and it can't vouch for any other site. Each account has its own, and the container renews it about every two years, when it needs trusting again.
+
 **6. Set up MT5.**
 1. Log in to your demo account with *Save password* ticked.
 2. If *Welcome to LiveUpdate* says updates have been downloaded, click *Restart*.
@@ -150,7 +152,7 @@ ssh -N -L 3001:127.0.0.1:3001 -L 3101:127.0.0.1:3101 you@your-server
 A reverse proxy gives you your own domain with a trusted certificate, and a place for a real login in front, such as Cloudflare Access, Authelia or Authentik. The desktop's own password still applies behind it.
 
 Whatever the proxy, three things matter:
-1. **It connects over HTTPS, and checks the container's certificate.** The certificate the container makes for itself names no host, so a proxy can't check it. Make one for the name the proxy uses (below).
+1. **It connects over HTTPS, and checks the container's certificate.** The certificate the container makes for itself names only `localhost` and `127.0.0.1`, and changes when it's renewed. Make one for the name the proxy uses (below).
 2. **It passes the browser's `Host` header on.** The desktop streams over a WebSocket, which the container accepts only from the page's own origin, and it learns that origin from `Host`. A proxy that replaces `Host` gets the stream refused (403). If yours can't keep it, list your public origin in `SELKIES_ALLOWED_ORIGINS`, such as `https://mt5.example.com`.
 3. **Only the proxy reaches the container.** Give the proxy and each container a network of their own, one per account, so demo and live still can't reach each other. List the proxy's address in `TRUSTED_PROXIES`: everyone else gets 403, and the log shows the browser's address (`X-Forwarded-For`) for requests that come through the proxy.
 
@@ -295,7 +297,7 @@ ingress:
   - service: http_status:404
 ```
 
-**A proxy installed on the server itself,** outside Docker, connects to `https://127.0.0.1:3001` instead of `https://demo:3001`, with the same certificate and the same server name, `demo`. Leave `TRUSTED_PROXIES` unset then: only the server can reach a port published on `127.0.0.1`, and the container sees Docker's gateway address rather than the proxy's.
+**A proxy installed on the server itself,** outside Docker, connects to `https://127.0.0.1:3001` instead of `https://demo:3001`, with the same certificate and the same server name, `demo`. It could trust the container's own `cert.pem` instead, with server name `localhost`, but would then need the new one after every renewal. Leave `TRUSTED_PROXIES` unset: only the server can reach a port published on `127.0.0.1`, and the container sees Docker's gateway address rather than the proxy's.
 
 ### Host networking
 
@@ -332,7 +334,7 @@ Set these under `environment` in `compose.yaml` or your `compose.override.yaml`.
 | `TITLE` | `MetaTrader5` | The browser tab's name. |
 | `PUID`, `PGID` | `911` | The user and group that own `/config`. The example uses 1000. |
 | `TZ` | UTC | The desktop's time zone. MT5 shows its server's time anyway. |
-| `TLS_CERT_FILE`, `TLS_KEY_FILE` | none | A certificate and key to serve, usually Docker secrets. Without them the container serves `/config/ssl/cert.pem` and `cert.key`, which it makes itself (self-signed) if they don't exist. You can replace those two files. A new certificate takes effect at the next container restart. |
+| `TLS_CERT_FILE`, `TLS_KEY_FILE` | none | A certificate and key to serve, usually Docker secrets. Without them the container serves `/config/ssl/cert.pem` and `cert.key`. If they don't exist, it makes its own there: self-signed, issued to `localhost`, `127.0.0.1` and `::1`, unable to sign other certificates, and valid for 825 days. A start in its last 30 days renews it. You can put your own certificate in those two files instead; the container never touches it. A new certificate takes effect at the next container restart. |
 | `TRUSTED_PROXIES` | none | IP addresses or ranges, such as `10.250.10.10` or `10.8.0.0/24`. When set, only they get in, and everyone else gets 403. Requests from them have their `X-Forwarded-For` logged. |
 | `SELKIES_ALLOWED_ORIGINS` | none: the page's own origin only | Other origins allowed to open the stream, comma-separated, such as `https://mt5.example.com`. `*` is refused. |
 | `CUSTOM_HTTPS_PORT` | `3001` | The HTTPS port inside the container. |
@@ -367,7 +369,8 @@ Set these under `environment` in `compose.yaml` or your `compose.override.yaml`.
 ## Using MT5 in the browser
 
 - **The clipboard** works both ways. The browser asks for permission once.
-- **The side panel** opens with Ctrl+Shift+M. With file transfers on, it has the file panel. It has no video or audio settings, and no sound, microphone or webcam buttons.
+- **Sound:** MT5's sounds, such as a finished backtest or an alert, play in the browser. The speaker button in the side panel turns them off. A browser may wait for your first click on the page before it plays any.
+- **The side panel** opens with Ctrl+Shift+M. With file transfers on, it has the file panel. It has no video or audio settings, and no microphone or webcam buttons.
 - **Keyboard shortcuts:**
   - On Windows and Linux, the browser keeps Ctrl+N, Ctrl+T and Ctrl+W for itself. On macOS it passes them on to MT5, since its own shortcuts use Cmd.
   - F11 belongs to the browser.
@@ -439,7 +442,7 @@ That's what a first start looked up, with MT5 idle afterwards. Your broker, and 
 
 - **ARM.** MT5 is a 64-bit Windows program, so the image is amd64 only.
 - **VNC.** The desktop streams to browsers only. VNC would mean a second login and a second open port.
-- **Sound, microphone and webcam.** The desktop has no sound, and never uses your browser's microphone or camera.
+- **Microphone and webcam.** The desktop never uses your browser's microphone or camera.
 - **Python.** There's no Python bridge or API for MT5. Selkies, the desktop's streaming server, is itself a Python program; it listens only on a socket file inside the container.
 - **`init: true`, or `docker run --init`.** The image's own supervisor (s6) has to be process 1: with Docker's init, the container stops at once.
 - **EAs that need .NET.** Wine's Mono isn't included.
@@ -448,6 +451,7 @@ That's what a first start looked up, with MT5 idle afterwards. Your broker, and 
 ## Troubleshooting
 
 - **`docker compose logs demo`** has everything:
+  - the certificate, as an `[mt5-cert]` line when it's made or renewed;
   - the startup check, as `[mt5-access]` lines;
   - the install and every MT5 start, as `[mt5]` lines;
   - the stop, as `[mt5-stop]`;
