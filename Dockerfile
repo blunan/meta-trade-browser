@@ -169,4 +169,9 @@ rm -rf "$tmp"
 test "$actual" = "$(sort <<< "$expected")"
 EOF
 
+# Healthy while MT5 runs and the desktop answers. The first start installs for
+# about 2 minutes, which the start period covers.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5m --retries=3 \
+  CMD ["/opt/mt5/healthcheck.sh"]
+
 EXPOSE 3001
