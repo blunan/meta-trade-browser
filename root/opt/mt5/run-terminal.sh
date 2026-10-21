@@ -126,7 +126,8 @@ edge_as_win11() {
   if [[ "$(reg_sz 'Software\\Wine\\AppDefaults\\msedgewebview2.exe' Version)" == win11 ]]; then
     return 0
   fi
-  wine reg add 'HKCU\Software\Wine\AppDefaults\msedgewebview2.exe' /v Version /t REG_SZ /d win11 /f || return 1
+  wine reg add 'HKCU\Software\Wine\AppDefaults\msedgewebview2.exe' /v Version /t REG_SZ /d win11 /f > /dev/null ||
+    return 1
   log "Edge (WebView2) now runs as Windows 11"
 }
 
@@ -147,11 +148,11 @@ prepare_prefix() {
     wineboot -i || fail "the Wine prefix couldn't be created"
     # A crash ends the program, and the watchdog restarts it, instead of
     # leaving a dialog that waits for a click.
-    wine reg add 'HKCU\Software\Wine\WineDbg' /v ShowCrashDialog /t REG_DWORD /d 0 /f ||
+    wine reg add 'HKCU\Software\Wine\WineDbg' /v ShowCrashDialog /t REG_DWORD /d 0 /f > /dev/null ||
       fail "the Wine prefix's settings couldn't be written"
     # As Windows 10, Wine's default, MT5's copy protection reports "a debugger
     # has been found" (WineHQ bug 58043). MetaQuotes' installer sets 11 too.
-    wine reg add 'HKCU\Software\Wine' /v Version /t REG_SZ /d win11 /f ||
+    wine reg add 'HKCU\Software\Wine' /v Version /t REG_SZ /d win11 /f > /dev/null ||
       fail "the Wine prefix's settings couldn't be written"
     edge_as_win11 || fail "the Wine prefix's settings couldn't be written"
     # Nothing else runs in a new prefix yet, so this returns once Wine has
@@ -282,9 +283,17 @@ if [[ ! -f "$WINEPREFIX/.prefix-ready" || ! -f "$WINEPREFIX/.webview2-installed"
   started=$SECONDS
   notice "Installing MetaTrader 5. This takes a couple of minutes."
   tmp="$(mktemp -d)"
+  # Wine reports dozens of harmless errors while it builds the prefix and the
+  # installers run. With the image's WINEDEBUG they stay out of the log; a
+  # WINEDEBUG of your own applies to the install too.
+  wine_debug="${WINEDEBUG-}"
+  if [[ "$wine_debug" == fixme-all,err-toolbar ]]; then
+    export WINEDEBUG=-all
+  fi
   [[ -f "$WINEPREFIX/.prefix-ready" ]] || prepare_prefix
   [[ -f "$WINEPREFIX/.webview2-installed" ]] || install_webview2
   [[ -f "$WINEPREFIX/.mt5-installed" ]] || install_mt5
+  export WINEDEBUG="$wine_debug"
   rm -rf "$tmp"
   tmp=
   log "first start done in $((SECONDS - started)) s"

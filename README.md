@@ -344,7 +344,7 @@ Set these under `environment` in `compose.yaml` or your `compose.override.yaml`.
 | `MQL5_MOUNT_NAME` | `Mounted` | The name of the EA folder's links in MT5. A plain folder name. |
 | `MT5_STOP_TIMEOUT` | `20` | Seconds, 1 to 20, that MT5 gets to close when the container stops. |
 | `MT5_AI_AGENTS` | off | `true` turns on MT5's and MetaEditor's servers for AI agents (below). |
-| `WINEDEBUG` | `fixme-all,err-toolbar` | What Wine writes to the log: its errors, minus the noise from MT5's toolbar. For troubleshooting, `fixme-all` brings the toolbar's errors back, and an empty value restores Wine's defaults, which add its "fixme" notes. |
+| `WINEDEBUG` | `fixme-all,err-toolbar` | What Wine writes to the log: its errors, minus the noise from MT5's toolbar. During the first start's install, Wine writes nothing, unless you set `WINEDEBUG` yourself. For troubleshooting, `fixme-all` brings the toolbar's errors back, and an empty value restores Wine's defaults, which add its "fixme" notes. |
 | `WINEDLLOVERRIDES` | `mscoree,mshtml=` | Turns off Wine's Mono (.NET) and Gecko (Internet Explorer's engine), so Wine never stops to offer them; MT5 uses neither. A value of your own replaces this one, so keep those two in it. |
 
 **Refused:** the container stops at once, and its log says why in a `[mt5-access] REFUSED:` line. With `restart: unless-stopped`, `docker compose ps` then shows it *Restarting*. These settings remove a protection and have no use here:
@@ -367,7 +367,7 @@ Set these under `environment` in `compose.yaml` or your `compose.override.yaml`.
 ## Using MT5 in the browser
 
 - **The clipboard** works both ways. The browser asks for permission once.
-- **The side panel** opens with Ctrl+Shift+M. With file transfers on, it has the file panel.
+- **The side panel** opens with Ctrl+Shift+M. With file transfers on, it has the file panel. It has no video or audio settings, and no sound, microphone or webcam buttons.
 - **Keyboard shortcuts:**
   - On Windows and Linux, the browser keeps Ctrl+N, Ctrl+T and Ctrl+W for itself. On macOS it passes them on to MT5, since its own shortcuts use Cmd.
   - F11 belongs to the browser.
@@ -439,6 +439,7 @@ That's what a first start looked up, with MT5 idle afterwards. Your broker, and 
 
 - **ARM.** MT5 is a 64-bit Windows program, so the image is amd64 only.
 - **VNC.** The desktop streams to browsers only. VNC would mean a second login and a second open port.
+- **Sound, microphone and webcam.** The desktop has no sound, and never uses your browser's microphone or camera.
 - **Python.** There's no Python bridge or API for MT5. Selkies, the desktop's streaming server, is itself a Python program; it listens only on a socket file inside the container.
 - **`init: true`, or `docker run --init`.** The image's own supervisor (s6) has to be process 1: with Docker's init, the container stops at once.
 - **EAs that need .NET.** Wine's Mono isn't included.
@@ -456,6 +457,12 @@ That's what a first start looked up, with MT5 idle afterwards. Your broker, and 
 - **A failed install step** shows a small window on the desktop, and the log says why. It's tried again every 60 s: a lost download, or a signature check that failed because a revocation list couldn't be fetched, usually passes on a later try. A file whose signature is wrong is never run.
 - **Behind a proxy, the page loads but the desktop never appears:** the proxy probably replaces `Host`, and the container refuses the stream (see *Behind a reverse proxy*).
 - **More from Wine:** `WINEDEBUG=fixme-all`, or empty (see *Settings*).
+- **Harmless messages at every start,** from the desktop the image is built on:
+  - `17` and `18`: the sound server numbering the two audio devices it creates;
+  - `_XSERVTransmkdir: Cannot create /tmp/.X11-unix with root ownership` and `screen 0 shmid 0`: the display starting as the desktop's user;
+  - `xsettingsd: Unable to open connection to X server`, now and then: it started a moment before the display, and is started again;
+  - `No hardware encoder … (nvenc)` and `Failed to init NVENC`: the stream looks for a GPU encoder, and without one encodes on the CPU;
+  - `Apps panel enabled`: the panel stays hidden, and its actions are off.
 
 ## Advanced: pin a digest and check its signature
 

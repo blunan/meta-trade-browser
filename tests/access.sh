@@ -163,11 +163,12 @@ ws() {
 }
 
 # security_headers <curl options and URL...>: succeeds when all four are there.
+# Only the desktop's own page may frame it (its file panel is a frame).
 security_headers() {
   local headers
   headers="$(docker exec "$run-probe" curl -sk -D - -o /dev/null --max-time 5 "$@" | tr -d '\r')"
-  grep -qx "Content-Security-Policy: frame-ancestors 'none'" <<< "$headers" &&
-    grep -qx 'X-Frame-Options: DENY' <<< "$headers" &&
+  grep -qx "Content-Security-Policy: frame-ancestors 'self'" <<< "$headers" &&
+    grep -qx 'X-Frame-Options: SAMEORIGIN' <<< "$headers" &&
     grep -qx 'X-Content-Type-Options: nosniff' <<< "$headers" &&
     grep -qx 'Referrer-Policy: no-referrer' <<< "$headers"
 }
@@ -219,13 +220,14 @@ refused "T10: SELKIES_MODE=webrtc" "WebRTC streaming" "${with_password[@]}" -e S
 refused "T10: SELKIES_ENABLE_DUAL_MODE=true" "WebRTC streaming" "${with_password[@]}" -e SELKIES_ENABLE_DUAL_MODE=true
 refused "T10: SELKIES_COMPUTER_USE_BIND" "SELKIES_COMPUTER_USE_BIND" "${with_password[@]}" -e SELKIES_COMPUTER_USE_BIND=8090
 refused "T10: another SELKIES_UNIX_SOCKET" "SELKIES_UNIX_SOCKET must stay" "${with_password[@]}" -e SELKIES_UNIX_SOCKET=/tmp/other.sock
+refused "T10: SELKIES_ENABLE_BASIC_AUTH=true" "SELKIES_ENABLE_BASIC_AUTH=true" "${with_password[@]}" -e SELKIES_ENABLE_BASIC_AUTH=true
 refused "T10: the Docker socket mounted" "Docker socket is mounted" "${with_password[@]}" -v "$tmp/docker.sock:/var/run/docker.sock:ro"
 refused "T10: SYS_ADMIN (privileged)" "CAP_SYS_ADMIN" "${with_password[@]}" --cap-add SYS_ADMIN
 refused "T10: only TLS_CERT_FILE" "only one of TLS_CERT_FILE" "${with_password[@]}" -e TLS_CERT_FILE=/config/ssl/cert.pem
 refused "T10: LISTEN_ADDRESS that isn't an address" "LISTEN_ADDRESS must be one IP address" "${with_password[@]}" -e LISTEN_ADDRESS=all
 refused "T10: SUBFOLDER without slashes" "SUBFOLDER must start and end with '/'" "${with_password[@]}" -e SUBFOLDER=mt5
 
-echo "Defaults (T2, T3, T5-T8, T13, T14, T16, T17)"
+echo "Defaults (T2, T3, T5-T8, T13, T14, T16, T17, T19)"
 start "$net" main "${with_password[@]}"
 if ready main; then
   t="$run-main:3001"
@@ -278,6 +280,11 @@ if ready main; then
   selkies_pid="$(docker exec "$run-main" pgrep -o -f 'selkies --addr')"
   check "T14: Selkies' environment has no PASSWORD" 0 \
     "$(docker exec -u abc "$run-main" sh -c "tr '\0' '\n' < /proc/$selkies_pid/environ | grep -c '^PASSWORD=' || true")"
+  check "T19: Selkies runs without its own login, sound, microphone, webcam, or audio and video settings" \
+    "SELKIES_AUDIO_ENABLED=false|locked SELKIES_ENABLE_BASIC_AUTH=false SELKIES_MICROPHONE_ENABLED=false|locked SELKIES_UI_SIDEBAR_SHOW_AUDIO_SETTINGS=false|locked SELKIES_UI_SIDEBAR_SHOW_VIDEO_SETTINGS=false|locked SELKIES_WEBCAM_ENABLED=false|locked" \
+    "$(docker exec -u abc "$run-main" sh -c "tr '\0' '\n' < /proc/$selkies_pid/environ |
+      grep -E '^SELKIES_((AUDIO|MICROPHONE|WEBCAM)_ENABLED|ENABLE_BASIC_AUTH|UI_SIDEBAR_SHOW_(AUDIO|VIDEO)_SETTINGS)=' |
+      sort | paste -s -d ' '")"
   check "T16: listening sockets (only HTTPS on 3001)" "00000000:0BB9" "$(listeners main)"
   check "T16: listening abstract sockets" 0 \
     "$(docker exec "$run-main" sh -c 'awk "NR > 1 && \$4 == \"00010000\" && \$8 ~ /^@/" /proc/net/unix | wc -l')"
@@ -326,6 +333,23 @@ if ready proxies; then
   check "T3: nothing on port 3000" 000 "$(code "http://$run-proxies:3000/")"
 fi
 docker rm -f "$run-proxies" > /dev/null
+
+echo "File transfers on (T18), and SELKIES_ENABLE_BASIC_AUTH empty (T19)"
+start "$net" files "${with_password[@]}" -e SELKIES_FILE_TRANSFERS=upload,download -e SELKIES_ENABLE_BASIC_AUTH=
+if ready files; then
+  t="$run-files:3001"
+  check "T19: Selkies starts, its login off, when SELKIES_ENABLE_BASIC_AUTH is empty" false \
+    "$(docker exec "$run-files" cat /run/s6/container_environment/SELKIES_ENABLE_BASIC_AUTH)"
+  check "T18: upload" 200 \
+    "$(code -u "$user:$password" -X POST -H "Origin: https://$t" -H 'X-Upload-Path: access-test.txt' \
+      --data-binary @/etc/hostname "https://$t/api/upload")"
+  check "T18: the file list" 200 "$(code -u "$user:$password" "https://$t/api/files/")"
+  check_true "T18: the file list may be framed by the desktop's own page only" \
+    security_headers -u "$user:$password" "https://$t/api/files/"
+  check "T18: download" "$(docker exec "$run-probe" cat /etc/hostname)" \
+    "$(docker exec "$run-probe" curl -sk --max-time 5 -u "$user:$password" "https://$t/api/files/access-test.txt" || true)"
+fi
+docker rm -f "$run-files" > /dev/null
 
 echo "CUSTOM_PORT and PASSWORD (T3, warnings)"
 start "$net" plain -e CUSTOM_PORT=3000 -e "PASSWORD=$password"

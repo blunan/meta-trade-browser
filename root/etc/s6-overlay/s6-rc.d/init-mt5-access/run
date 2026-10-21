@@ -197,6 +197,15 @@ fi
 if [[ "${SELKIES_UNIX_SOCKET:-}" != "$socket" ]]; then
   refuse "SELKIES_UNIX_SOCKET must stay $socket. nginx's site and the socket folder are made for it."
 fi
+# Selkies' own login. nginx does the login, and the password never reaches
+# Selkies (step 6). With its login on, Selkies wouldn't start without one, and
+# unset means on.
+if selkies_true "${SELKIES_ENABLE_BASIC_AUTH:-}"; then
+  refuse "SELKIES_ENABLE_BASIC_AUTH=true. nginx does the login, and Selkies never gets the password, so it couldn't start."
+fi
+if [[ -z "${SELKIES_ENABLE_BASIC_AUTH:-}" ]]; then
+  printf 'false' > "$env_dir/SELKIES_ENABLE_BASIC_AUTH"
+fi
 
 ## Settings that loosen things for a reason you might have.
 harden="${HARDEN_DESKTOP:-}"

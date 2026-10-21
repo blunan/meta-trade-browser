@@ -30,9 +30,10 @@ server {
   auth_basic_user_file /etc/nginx/.htpasswd;
 
   # On every response, errors included. No location adds headers of its own,
-  # because nginx would then drop these there.
-  add_header Content-Security-Policy "frame-ancestors 'none'" always;
-  add_header X-Frame-Options "DENY" always;
+  # because nginx would then drop these there. Only the desktop's own page may
+  # frame it: its file panel shows the file list in a frame.
+  add_header Content-Security-Policy "frame-ancestors 'self'" always;
+  add_header X-Frame-Options "SAMEORIGIN" always;
   add_header X-Content-Type-Options "nosniff" always;
   add_header Referrer-Policy "no-referrer" always;
 

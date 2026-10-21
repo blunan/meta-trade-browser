@@ -27,7 +27,10 @@ LABEL org.opencontainers.image.title="mt5-desktop" \
       maintainer="Brayan Luna"
 
 # Same-origin streaming only, no commands from the web page, no switch to
-# WebRTC, and Selkies on a socket file that only nginx can reach.
+# WebRTC, and Selkies on a socket file that only nginx can reach. No sound,
+# microphone or webcam: locked off, their buttons leave the side panel. The
+# side panel has no video or audio settings either. Selkies' own login stays
+# off (the base sets it; init-mt5-access makes sure).
 ENV TITLE=MetaTrader5 \
     PIXELFLUX_WAYLAND=false \
     WINEPREFIX=/config/.wine \
@@ -38,7 +41,6 @@ ENV TITLE=MetaTrader5 \
     PELORUS=false \
     SELKIES_ALLOWED_ORIGINS= \
     SELKIES_COMMAND_ENABLED=false \
-    SELKIES_ENABLE_BASIC_AUTH=false \
     SELKIES_UNIX_SOCKET=/run/selkies/selkies.sock \
     SELKIES_ENABLE_DUAL_MODE=false \
     SELKIES_ENABLE_SHARING=false \
@@ -46,7 +48,11 @@ ENV TITLE=MetaTrader5 \
     SELKIES_PRINTING_ENABLED=false \
     SELKIES_CLIPBOARD_ENABLED=true \
     SELKIES_FILE_TRANSFERS=none \
-    SELKIES_AUDIO_ENABLED=false \
+    SELKIES_AUDIO_ENABLED='false|locked' \
+    SELKIES_MICROPHONE_ENABLED='false|locked' \
+    SELKIES_WEBCAM_ENABLED='false|locked' \
+    SELKIES_UI_SIDEBAR_SHOW_AUDIO_SETTINGS='false|locked' \
+    SELKIES_UI_SIDEBAR_SHOW_VIDEO_SETTINGS='false|locked' \
     NO_WEBCAM=true \
     NO_GAMEPAD=true \
     S6_BEHAVIOUR_IF_STAGE2_FAILS=2
@@ -119,6 +125,9 @@ EOF
 #   processes and waits up to 5 s for them. Its list included openbox's
 #   thread, which ignores the signal, so every stop lost 5 s. Threads are
 #   left out now.
+# - The first start's self-signed certificate: openssl's progress, a block of
+#   dots and pluses, stays out of the log. A failure still shows: without a
+#   certificate, init-mt5-access stops the container and says so.
 RUN <<'EOF'
 #!/bin/bash
 set -euo pipefail
@@ -145,6 +154,11 @@ run=/etc/s6-overlay/s6-rc.d/svc-de/finish
 test "$(grep -c -F 'pstree -p "$PARENT_PID"' "$run")" -eq 1
 sed -i 's/pstree -p "\$PARENT_PID"/pstree -p -T "$PARENT_PID"/' "$run"
 test "$(grep -c -F 'pstree -p -T "$PARENT_PID"' "$run")" -eq 1
+
+run=/etc/s6-overlay/s6-rc.d/init-nginx/run
+test "$(grep -c -E '^ +-subj "[^"]*"$' "$run")" -eq 1
+sed -i -E 's/^( +-subj "[^"]*")$/\1 2> \/dev\/null/' "$run"
+test "$(grep -c -E '^ +-subj "[^"]*" 2> /dev/null$' "$run")" -eq 1
 EOF
 
 COPY root/ /
