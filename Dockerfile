@@ -115,6 +115,10 @@ EOF
 #   host networking would share.
 # - nginx's health-check socket outlives a killed nginx, which then can't
 #   start again, so nginx's start script removes a leftover one first.
+# - At a stop, the desktop service's finish script signals the desktop's
+#   processes and waits up to 5 s for them. Its list included openbox's
+#   thread, which ignores the signal, so every stop lost 5 s. Threads are
+#   left out now.
 RUN <<'EOF'
 #!/bin/bash
 set -euo pipefail
@@ -136,6 +140,11 @@ run=/etc/s6-overlay/s6-rc.d/svc-nginx/run
 test "$(grep -c '^exec /usr/sbin/nginx ' "$run")" -eq 1
 sed -i 's|^exec /usr/sbin/nginx |rm -f /run/mt5/health.sock\n&|' "$run"
 test "$(grep -c -x 'rm -f /run/mt5/health.sock' "$run")" -eq 1
+
+run=/etc/s6-overlay/s6-rc.d/svc-de/finish
+test "$(grep -c -F 'pstree -p "$PARENT_PID"' "$run")" -eq 1
+sed -i 's/pstree -p "\$PARENT_PID"/pstree -p -T "$PARENT_PID"/' "$run"
+test "$(grep -c -F 'pstree -p -T "$PARENT_PID"' "$run")" -eq 1
 EOF
 
 COPY root/ /

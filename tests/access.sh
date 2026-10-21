@@ -257,8 +257,13 @@ if ready main; then
     for n in xterm st stterm uxterm lxterminal gnome-terminal konsole xfce4-terminal terminator foot weston-terminal; do
       p=$(command -v "$n" 2> /dev/null) && [ -x "$p" ] && echo "$n"
     done; true')"
+  # By the programs the menu runs: MT5's own terminal64.exe isn't a terminal.
   check "T13: terminals in the menu" 0 \
-    "$(docker exec "$run-main" sh -c 'grep -c -i -E "xterm|terminal|konsole|foot" /config/.config/openbox/menu.xml || true')"
+    "$(docker exec "$run-main" sh -c 'sed -n "s|.*<command>\([^ <]*\).*|\1|p" /config/.config/openbox/menu.xml |
+      xargs -r -n 1 basename |
+      grep -c -x -E "xterm|st|stterm|uxterm|lxterminal|gnome-terminal|konsole|xfce4-terminal|terminator|foot|weston-terminal|x-terminal-emulator" || true')"
+  check "T13: the menu's entries" "MetaTrader 5,MetaEditor" \
+    "$(docker exec "$run-main" sh -c 'sed -n "s|.*<item label=\"\([^\"]*\)\".*|\1|p" /config/.config/openbox/menu.xml | paste -s -d ,')"
   env_json="$(docker inspect -f '{{json .Config.Env}}' "$run-main")"
   check_true "T14: docker inspect shows the password file's path" grep -qF 'FILE__PASSWORD=/run/secrets/password' <<< "$env_json"
   if grep -qF -- "$password" <<< "$env_json"; then

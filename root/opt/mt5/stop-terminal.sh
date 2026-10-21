@@ -1,0 +1,70 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+# stop-terminal.sh: the stop part of mt5-stop. When the container stops, s6
+# runs it while the desktop is still up. It asks MT5 to close, as File > Exit
+# does, so MT5 saves its charts and settings, and waits for it. Otherwise MT5
+# would be killed without saving.
+#   MT5_STOP_TIMEOUT  seconds to wait, 1 to 20 (default 20). s6 gives this
+#                     whole step 25 s at most (timeout-down).
+# MetaEditor isn't asked: a "Save changes?" dialog would just wait there.
+#
+# Under Wine, the Config/accounts.dat that MT5 writes while closing works only
+# until the container stops: at the next container start, MT5 logs "Accounts
+# deleted due security reason", deletes it, and doesn't log in. The copy it
+# wrote while running survives, so that one is put back once MT5 has closed.
+set -euo pipefail
+
+log_file=/config/log/mt5/run-terminal.log
+mt5_process='^[A-Za-z]:\\.*\\terminal64\.exe( |$)'
+accounts="${WINEPREFIX:-/config/.wine}/drive_c/Program Files/MetaTrader 5/Config/accounts.dat"
+
+# Into MT5's log, which svc-mt5-log copies into docker logs, as long as the
+# desktop user can write it.
+out=/dev/stdout
+if s6-setuidgid abc touch "$log_file" 2> /dev/null; then
+  out="$log_file"
+fi
+log() { printf '%s [mt5-stop] %s\n' "$(date -u +%FT%TZ)" "$*" >> "$out"; }
+now_us() { echo "${EPOCHREALTIME//[!0-9]/}"; }
+
+timeout_s="${MT5_STOP_TIMEOUT:-20}"
+if [[ ! "$timeout_s" =~ ^[0-9]{1,2}$ ]] || (( 10#$timeout_s < 1 || 10#$timeout_s > 20 )); then
+  log "MT5_STOP_TIMEOUT must be 1 to 20 seconds; waiting up to 20"
+  timeout_s=20
+fi
+timeout_s=$((10#$timeout_s))
+
+# While this file exists, run-terminal.sh sleeps instead of starting MT5, so
+# the watchdog can't bring MT5 back in the middle of the stop.
+touch /run/mt5/stopping
+
+if ! pid="$(pgrep -o -f "$mt5_process")"; then
+  log "MT5 isn't running"
+  exit 0
+fi
+saved=no
+if [[ -f "$accounts" ]] && s6-setuidgid abc cp -p "$accounts" "$accounts.mt5-stop"; then
+  saved=yes
+fi
+log "asking MT5 (pid $pid) to close"
+started="$(now_us)"
+# Without /f, taskkill sends the same close request as File > Exit.
+s6-setuidgid abc timeout 10 wine taskkill /im terminal64.exe >> "$out" 2>&1 ||
+  log "taskkill failed; waiting anyway"
+closed=yes
+while kill -0 "$pid" 2> /dev/null; do
+  if (( $(now_us) - started > timeout_s * 1000000 )); then
+    closed=no
+    break
+  fi
+  sleep 0.2
+done
+if [[ "$closed" == yes ]]; then
+  tenths=$((($(now_us) - started) / 100000))
+  log "MT5 closed in $((tenths / 10)).$((tenths % 10)) s"
+else
+  log "MT5 didn't close within $timeout_s s, so it stops unsaved with the container"
+fi
+if [[ "$saved" == yes ]] && s6-setuidgid abc mv -f "$accounts.mt5-stop" "$accounts"; then
+  log "put back Config/accounts.dat from before the close, so that MT5 logs in by itself at the next start"
+fi
