@@ -31,8 +31,11 @@ LABEL org.opencontainers.image.title="mt5-desktop" \
 # play in the browser, but the microphone and webcam are locked off, and their
 # buttons leave the side panel. The side panel has no video or audio settings
 # (the audio ones include a microphone picker). Selkies' own login stays off
-# (the base sets it; init-mt5-access makes sure).
+# (the base sets it; init-mt5-access makes sure). The login name is trader.
+# The file panel shows when file transfers are on: init-mt5-access sets it,
+# unless you do.
 ENV TITLE=MetaTrader5 \
+    CUSTOM_USER=trader \
     PIXELFLUX_WAYLAND=false \
     WINEPREFIX=/config/.wine \
     WINEDEBUG=fixme-all,err-toolbar \
@@ -49,6 +52,7 @@ ENV TITLE=MetaTrader5 \
     SELKIES_PRINTING_ENABLED=false \
     SELKIES_CLIPBOARD_ENABLED=true \
     SELKIES_FILE_TRANSFERS=none \
+    SELKIES_UI_SIDEBAR_SHOW_FILES=auto \
     SELKIES_AUDIO_ENABLED=true \
     SELKIES_MICROPHONE_ENABLED='false|locked' \
     SELKIES_WEBCAM_ENABLED='false|locked' \

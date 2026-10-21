@@ -246,17 +246,13 @@ set_ai_agents() {
 }
 
 # The optional /mql5 mount holds your own EAs, indicators and the rest. Each of
-# its sections appears in MT5's MQL5 folder as <section>/<MQL5_MOUNT_NAME>
-# (default Mounted), a link into the mount.
+# its sections appears in MT5's MQL5 folder as <section>/Mounted, a link into
+# the mount.
 link_mounts() {
-  local name="${MQL5_MOUNT_NAME:-Mounted}" plain='^[A-Za-z0-9._ -]+$' section src dest linked=()
+  local name=Mounted section src dest linked=()
   if [[ ! -d /mql5 ]]; then
     log "no /mql5 mount"
     return 0
-  fi
-  if [[ ! "$name" =~ $plain || "$name" == . || "$name" == .. ]]; then
-    log "MQL5_MOUNT_NAME must be a plain folder name; using 'Mounted'"
-    name=Mounted
   fi
   for section in Experts Indicators Scripts Include Libraries Presets; do
     src="/mql5/$section"

@@ -25,40 +25,38 @@ git clone https://github.com/blunan/trader-bot.git mt5
 cd mt5
 ```
 
-`compose.yaml` defines two containers: `demo`, for a demo account, and `live`, for a real one. Start with demo.
+`compose.yaml` defines one container, `desktop`, for one trading account.
 
-**2. Create the folders.** Each account's folder will hold its saved broker logins, so only its owner may open it:
+**2. Create the folders.** The account's folder will hold its saved broker logins, so only its owner may open it:
 
 ```sh
-mkdir -p -m 700 data/demo data/live secrets
+mkdir -p -m 700 data/desktop secrets
 mkdir -p ea
 ```
 
-`ea` is the EA folder the two containers share. The containers work as user ID 1000. If `id -u` doesn't print 1000, give them the EA folder with `sudo chown 1000:1000 ea`.
+`ea` is the EA folder. The container works as user ID 1000. If `id -u` doesn't print 1000, give it the EA folder with `sudo chown 1000:1000 ea`.
 
-**3. Create the desktop passwords,** one file per account:
+**3. Create the desktop password:**
 
 ```sh
-openssl rand -base64 24 | tr -d '\n' > secrets/demo_password
-openssl rand -base64 24 | tr -d '\n' > secrets/live_password
-cat secrets/demo_password; echo
-cat secrets/live_password; echo
+openssl rand -base64 24 | tr -d '\n' > secrets/password
+cat secrets/password; echo
 ```
 
-Keep the passwords in your password manager. A password of your own works too: one line, at least 12 characters. Then make the files root's, so nothing inside the desktop can read them:
+Keep the password in your password manager. A password of your own works too: one line, at least 12 characters. Then make the file root's, so nothing inside the desktop can read it:
 
 ```sh
-sudo chown root:root secrets/*
-sudo chmod 0400 secrets/*
+sudo chown root:root secrets/password
+sudo chmod 0400 secrets/password
 ```
 
-From then on, `sudo cat secrets/demo_password` shows a password.
+From then on, `sudo cat secrets/password` shows the password.
 
-**4. Start demo** and follow its log:
+**4. Start the desktop** and follow its log:
 
 ```sh
-docker compose up -d demo
-docker compose logs -f demo
+docker compose up -d
+docker compose logs -f
 ```
 
 The first start installs Microsoft Edge WebView2 and MT5. It takes about 2–3 minutes, and it's done when the log says `starting MetaTrader 5`. Ctrl+C stops following the log; the container keeps running.
@@ -69,12 +67,12 @@ The first start installs Microsoft Edge WebView2 and MT5. It takes about 2–3 m
 ssh -N -L 3001:127.0.0.1:3001 you@your-server
 ```
 
-Then browse to `https://localhost:3001`. The browser warns about the certificate, because the container made its own; accept it. Sign in as `trader` with demo's password. While MT5 is still installing, the desktop shows a small *Installing MetaTrader 5* window.
+Then browse to `https://localhost:3001`. The browser warns about the certificate, because the container made its own; accept it. Sign in as `trader` with the password. While MT5 is still installing, the desktop shows a small *Installing MetaTrader 5* window.
 
-To stop the warning for good, trust that certificate on your computer: copy `data/demo/ssl/cert.pem` from the server, and add it to your trusted certificates (on macOS, open it in Keychain Access and set it to *Always Trust*). It's issued to `localhost` and `127.0.0.1` only, and it can't vouch for any other site. Each account has its own, and the container renews it about every two years, when it needs trusting again.
+To stop the warning for good, trust that certificate on your computer: copy `data/desktop/ssl/cert.pem` from the server, and add it to your trusted certificates (on macOS, open it in Keychain Access and set it to *Always Trust*). It's issued to `localhost` and `127.0.0.1` only, and it can't vouch for any other site. The container renews it about every two years, when it needs trusting again.
 
 **6. Set up MT5.**
-1. Log in to your demo account with *Save password* ticked.
+1. Log in to your trading account with *Save password* ticked.
 2. If *Welcome to LiveUpdate* says updates have been downloaded, click *Restart*.
 3. Under **Tools → Options → Experts**:
    - **Allow algorithmic trading:** on.
@@ -86,20 +84,11 @@ To stop the warning for good, trust that certificate on your computer: copy `dat
    - **Allow WebRequest for listed URL:** off, unless an EA needs it.
 4. To keep memory and traffic down: **Charts → Max bars in chart:** 50000, and **Server → Enable news:** off.
 
-**7. Add live** once your EAs have done well on demo:
-
-```sh
-docker compose up -d live
-ssh -N -L 3101:127.0.0.1:3101 you@your-server
-```
-
-Browse to `https://localhost:3101`, and repeat step 6 with the real account. Live's browser tab is named *MT5 LIVE*, and demo's *MT5 demo*, so the two are hard to mix up.
-
 ## Folders and files
 
 | In the container | In the example | What's in it |
 |---|---|---|
-| `/config` (required) | `./data/demo`, `./data/live` | Everything for one account: Wine, the MT5 program, account logins and servers, charts with their EAs and inputs, settings, price history and logs, and the desktop's certificate. MT5 updates itself here. |
+| `/config` (required) | `./data/desktop` | Everything for one account: Wine, the MT5 program, account logins and servers, charts with their EAs and inputs, settings, price history and logs, and the desktop's certificate. MT5 updates itself here. |
 | `/mql5` (optional) | `./ea` | Your own EAs, indicators and scripts, laid out like MT5's `MQL5` folder: `Experts`, `Indicators`, `Scripts`, `Include`, `Libraries`, `Presets`. |
 | `/run/secrets/…` | `./secrets/…` | The desktop password, and optionally a certificate and its key. |
 
@@ -107,32 +96,54 @@ Browse to `https://localhost:3101`, and repeat step 6 with the real account. Liv
 - One folder per container, never shared: the account lives there.
 - It's a bind mount (a host folder), not a named Docker volume. `docker system prune --volumes` can't delete it while the container is stopped, and it's easy to back up.
 - Keep it at mode `0700`: it holds saved broker logins. The container makes user 1000 (`PUID`) its owner at every start, and its log warns if other users on the host have any access to it.
-- Back up every `data/*` folder and the EA folder regularly, encrypted, and try a restore now and then.
+- Back up the `data` folder and the EA folder regularly, encrypted, and try a restore now and then.
 
 **The EA folder (`/mql5`):**
-- Each of its sections appears in MT5 as a subfolder named `Mounted`, such as `MQL5/Experts/Mounted`. `MQL5_MOUNT_NAME` changes that name.
+- Each of its sections appears in MT5 as a subfolder named `Mounted`, such as `MQL5/Experts/Mounted`.
 - `Files` is never linked, because EAs keep their own data there.
 - A missing section is created when the folder is writable, and skipped when it's read-only.
 - On its first start, MT5 compiles the sources it finds there.
 - *Refresh* in the Navigator shows files added on the host.
 
-**Moving an EA from demo to live** with the example's shared folder, read-write on demo and read-only on live:
-1. On demo, write the EA in MetaEditor under `Experts/Mounted/`, compile it, attach it to a chart, and test it.
-2. Start live. The EA is already in its Navigator, under *Expert Advisors → Mounted*.
-3. Attach it on live with the same inputs, saved as a `.set` file in `Presets/Mounted/`, then turn on Algo Trading.
+## More than one account
 
-**The versioning rule:** once an EA runs somewhere, don't edit that file again. Edit a renamed copy instead, such as `MyEA_v2.mq5`. A recompile reloads the EA at once in the terminal that compiled it. Other terminals keep the build they loaded until they next load the EA, after a restart for example.
+One container runs one trading account. For another, add a service in `compose.override.yaml`, next to `compose.yaml`. Compose reads both files, and keeping your changes in this one leaves the example as it is for updates. This service takes `desktop`'s settings, with a folder, password, port and network of its own:
+
+```yaml
+services:
+  second:
+    extends: { file: compose.yaml, service: desktop }
+    environment:
+      FILE__PASSWORD: /run/secrets/second_password
+    secrets: !override [second_password]
+    volumes:
+      - ./data/second:/config
+    ports: !override
+      - "${BIND_ADDRESS:-127.0.0.1}:3101:3001"
+    networks: [second]
+
+networks:
+  second: {}                                   # its own: it and desktop can't reach each other
+
+secrets:
+  second_password: { file: ./secrets/second_password }
+```
+
+Create its folder and password file as in steps 2 and 3, then run `docker compose up -d`. A different `TITLE` tells the browser tabs apart.
+
+- **The EA folder** can be shared, as here. Where it shouldn't be edited, mount it read-only: `./ea:/mql5:ro`.
+- **A recompile** in MetaEditor reloads the EA at once in the terminal that compiled it. The other terminals keep the build they loaded until they next load it, after a restart for example.
 
 ## Reaching the desktop
 
-The container serves the desktop over HTTPS on port 3001; there's no plain-HTTP port. Docker publishes it on `BIND_ADDRESS`, `127.0.0.1` unless you set it in `.env` (copy `.env.example`): demo on 3001 and live on 3101. Pick one of these ways in.
+The container serves the desktop over HTTPS on port 3001; there's no plain-HTTP port. Docker publishes it on `BIND_ADDRESS`, `127.0.0.1` unless you set it in `.env` (copy `.env.example`). Pick one of these ways in.
 
 ### SSH tunnel
 
 The quick start's way. Nothing else is needed, and nothing new is exposed:
 
 ```sh
-ssh -N -L 3001:127.0.0.1:3001 -L 3101:127.0.0.1:3101 you@your-server
+ssh -N -L 3001:127.0.0.1:3001 you@your-server
 ```
 
 ### A VPN
@@ -142,7 +153,6 @@ ssh -N -L 3001:127.0.0.1:3001 -L 3101:127.0.0.1:3101 you@your-server
 
   ```sh
   sudo tailscale serve --bg --https=3001 https+insecure://127.0.0.1:3001
-  sudo tailscale serve --bg --https=3101 https+insecure://127.0.0.1:3101
   ```
 
   Then browse to `https://<machine>.<tailnet>.ts.net:3001`. `https+insecure` means Tailscale doesn't check the container's certificate; that hop never leaves the server.
@@ -154,31 +164,31 @@ A reverse proxy gives you your own domain with a trusted certificate, and a plac
 Whatever the proxy, three things matter:
 1. **It connects over HTTPS, and checks the container's certificate.** The certificate the container makes for itself names only `localhost` and `127.0.0.1`, and changes when it's renewed. Make one for the name the proxy uses (below).
 2. **It passes the browser's `Host` header on.** The desktop streams over a WebSocket, which the container accepts only from the page's own origin, and it learns that origin from `Host`. A proxy that replaces `Host` gets the stream refused (403). If yours can't keep it, list your public origin in `SELKIES_ALLOWED_ORIGINS`, such as `https://mt5.example.com`.
-3. **Only the proxy reaches the container.** Give the proxy and each container a network of their own, one per account, so demo and live still can't reach each other. List the proxy's address in `TRUSTED_PROXIES`: everyone else gets 403, and the log shows the browser's address (`X-Forwarded-For`) for requests that come through the proxy.
+3. **Only the proxy reaches the container.** Give the proxy and the container a network of their own. List the proxy's address in `TRUSTED_PROXIES`: everyone else gets 403, and the log shows the browser's address (`X-Forwarded-For`) for requests that come through the proxy.
 
 **A certificate for the proxy's connection,** named after the service:
 
 ```sh
 openssl req -x509 -newkey rsa:3072 -sha256 -days 3650 -nodes \
-  -keyout secrets/demo_tls.key -out secrets/demo_tls.pem \
-  -subj /CN=demo -addext subjectAltName=DNS:demo
-sudo chown root:root secrets/demo_tls.key
-sudo chmod 0400 secrets/demo_tls.key
+  -keyout secrets/tls.key -out secrets/tls.pem \
+  -subj /CN=desktop -addext subjectAltName=DNS:desktop
+sudo chown root:root secrets/tls.key
+sudo chmod 0400 secrets/tls.key
 ```
 
-The proxy gets a copy of `demo_tls.pem`, the certificate. The key stays with the container.
+The proxy gets a copy of `tls.pem`, the certificate. The key stays with the container.
 
 **`compose.override.yaml`,** next to `compose.yaml`, with Caddy as the example. Compose reads both files, and keeping your changes in this one leaves the example as it is for updates:
 
 ```yaml
 services:
-  demo:
+  desktop:
     environment:
-      TLS_CERT_FILE: /run/secrets/demo_tls_cert
-      TLS_KEY_FILE: /run/secrets/demo_tls_key
-      TRUSTED_PROXIES: 10.250.10.10            # Caddy's address on proxy-demo
-    secrets: [demo_tls_cert, demo_tls_key]
-    networks: [proxy-demo]
+      TLS_CERT_FILE: /run/secrets/tls_cert
+      TLS_KEY_FILE: /run/secrets/tls_key
+      TRUSTED_PROXIES: 10.250.10.10            # Caddy's address on the proxy network
+    secrets: [tls_cert, tls_key]
+    networks: [proxy]
 
   caddy:
     image: caddy:2
@@ -186,29 +196,27 @@ services:
     ports: ["80:80", "443:443"]
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./secrets/demo_tls.pem:/etc/caddy/demo_tls.pem:ro
+      - ./secrets/tls.pem:/etc/caddy/desktop.pem:ro
       - caddy-data:/data
     networks:
-      proxy-demo:
+      proxy:
         ipv4_address: 10.250.10.10
 
 networks:
-  proxy-demo:                                  # Caddy and demo only
+  proxy:                                       # Caddy and the desktop only
     ipam:
       config:
         - subnet: 10.250.10.0/24               # any free range
 
 secrets:
-  demo_tls_cert: { file: ./secrets/demo_tls.pem }
-  demo_tls_key: { file: ./secrets/demo_tls.key }
+  tls_cert: { file: ./secrets/tls.pem }
+  tls_key: { file: ./secrets/tls.key }
 
 volumes:
   caddy-data: {}
 ```
 
-For live, repeat it with `live`, `proxy-live`, another range and another certificate.
-
-Once `TRUSTED_PROXIES` is set, the SSH tunnel gets 403 too: through a published port, the container sees Docker's gateway address. If the proxy is your way in, you can stop publishing the port with `ports: !reset []` under `demo`.
+Once `TRUSTED_PROXIES` is set, the SSH tunnel gets 403 too: through a published port, the container sees Docker's gateway address. If the proxy is your way in, you can stop publishing the port with `ports: !reset []` under `desktop`.
 
 The settings for each proxy follow. Add your login (Authelia, Authentik, and so on) the way your proxy's documentation shows.
 
@@ -216,11 +224,11 @@ The settings for each proxy follow. Add your login (Authelia, Authentik, and so 
 
 ```
 mt5.example.com {
-	reverse_proxy https://demo:3001 {
+	reverse_proxy https://desktop:3001 {
 		header_up Host {host}
 		transport http {
-			tls_trust_pool file /etc/caddy/demo_tls.pem
-			tls_server_name demo
+			tls_trust_pool file /etc/caddy/desktop.pem
+			tls_server_name desktop
 		}
 	}
 }
@@ -230,10 +238,10 @@ mt5.example.com {
 
 ```nginx
 location / {
-    proxy_pass                    https://demo:3001;
+    proxy_pass                    https://desktop:3001;
     proxy_ssl_verify              on;
-    proxy_ssl_trusted_certificate /etc/nginx/demo_tls.pem;
-    proxy_ssl_name                demo;
+    proxy_ssl_trusted_certificate /etc/nginx/desktop.pem;
+    proxy_ssl_name                desktop;
     proxy_ssl_server_name         on;
     proxy_http_version            1.1;
     proxy_set_header              Host $http_host;
@@ -263,25 +271,25 @@ map $http_upgrade $connection_upgrade {
 ```yaml
 http:
   routers:
-    mt5-demo:
+    mt5:
       rule: Host(`mt5.example.com`)
       entryPoints: [websecure]
       tls: {}
-      service: mt5-demo
+      service: mt5
   services:
-    mt5-demo:
+    mt5:
       loadBalancer:
         servers:
-          - url: https://demo:3001
-        serversTransport: mt5-demo
+          - url: https://desktop:3001
+        serversTransport: mt5
   serversTransports:
-    mt5-demo:
-      serverName: demo
+    mt5:
+      serverName: desktop
       rootCAs:
-        - /etc/traefik/demo_tls.pem
+        - /etc/traefik/desktop.pem
 ```
 
-With Docker labels instead, the servers transport still has to be in a file. The labels then include `traefik.http.services.mt5-demo.loadbalancer.server.scheme=https`, `traefik.http.services.mt5-demo.loadbalancer.server.port=3001`, `traefik.http.services.mt5-demo.loadbalancer.serverstransport=mt5-demo@file` and `traefik.docker.network=mt5_proxy-demo`.
+With Docker labels instead, the servers transport still has to be in a file. The labels then include `traefik.http.services.mt5.loadbalancer.server.scheme=https`, `traefik.http.services.mt5.loadbalancer.server.port=3001`, `traefik.http.services.mt5.loadbalancer.serverstransport=mt5@file` and `traefik.docker.network=mt5_proxy`.
 
 **cloudflared**, a locally managed tunnel's `config.yml`. Protect the hostname with a Cloudflare Access application:
 
@@ -290,36 +298,29 @@ tunnel: <tunnel ID>
 credentials-file: /etc/cloudflared/<tunnel ID>.json
 ingress:
   - hostname: mt5.example.com
-    service: https://demo:3001
+    service: https://desktop:3001
     originRequest:
-      caPool: /etc/cloudflared/demo_tls.pem
-      originServerName: demo
+      caPool: /etc/cloudflared/desktop.pem
+      originServerName: desktop
   - service: http_status:404
 ```
 
-**A proxy installed on the server itself,** outside Docker, connects to `https://127.0.0.1:3001` instead of `https://demo:3001`, with the same certificate and the same server name, `demo`. It could trust the container's own `cert.pem` instead, with server name `localhost`, but would then need the new one after every renewal. Leave `TRUSTED_PROXIES` unset: only the server can reach a port published on `127.0.0.1`, and the container sees Docker's gateway address rather than the proxy's.
+**A proxy installed on the server itself,** outside Docker, connects to `https://127.0.0.1:3001` instead of `https://desktop:3001`, with the same certificate and the same server name, `desktop`. It could trust the container's own `cert.pem` instead, with server name `localhost`, but would then need the new one after every renewal. Leave `TRUSTED_PROXIES` unset: only the server can reach a port published on `127.0.0.1`, and the container sees Docker's gateway address rather than the proxy's.
 
 ### Host networking
 
 `network_mode: host` works too. The container then shares the server's network:
 - Only the HTTPS port listens on the server, on `127.0.0.1:3001` unless you set `LISTEN_ADDRESS`. Everything else inside stays on socket files or is off.
-- Two containers need different ports: set `CUSTOM_HTTPS_PORT` on each.
+- If port 3001 is taken on the server, set `CUSTOM_HTTPS_PORT`.
 - **But MT5, and every EA, can reach whatever listens on the server's own loopback,** such as other containers' published ports. The default bridge network doesn't allow that, so prefer it.
 
 In `compose.override.yaml`:
 
 ```yaml
 services:
-  demo:
+  desktop:
     network_mode: host
-    networks: !reset []
     ports: !reset []
-  live:
-    network_mode: host
-    networks: !reset []
-    ports: !reset []
-    environment:
-      CUSTOM_HTTPS_PORT: "3101"
 ```
 
 ## Settings
@@ -328,26 +329,35 @@ Set these under `environment` in `compose.yaml` or your `compose.override.yaml`.
 
 | Setting | Default | What it does |
 |---|---|---|
-| `FILE__PASSWORD` | none | **Required:** the path of the desktop password's file. At least 12 characters, and not a well-known placeholder such as `password` or `changeme`. A line break at the end is ignored. |
-| `PASSWORD` | none | The password itself. It works, but `docker inspect` shows it; use `FILE__PASSWORD`. |
-| `CUSTOM_USER` | `abc` | The desktop's login name. The example uses `trader`. |
-| `TITLE` | `MetaTrader5` | The browser tab's name. |
+| `FILE__PASSWORD` | none | **Required:** the path of the desktop password's file. At least 12 characters, and not a well-known placeholder such as `password` or `changeme`. A line break at the end is ignored. `PASSWORD`, the password itself, works too, but `docker inspect` shows it. |
 | `PUID`, `PGID` | `911` | The user and group that own `/config`. The example uses 1000. |
+| `CUSTOM_USER` | `trader` | The desktop's login name. |
+| `TITLE` | `MetaTrader5` | The browser tab's name. |
 | `TZ` | UTC | The desktop's time zone. MT5 shows its server's time anyway. |
+| `SELKIES_CLIPBOARD_ENABLED` | `true` | The shared clipboard: `true`, `in` (browser to desktop only), `out` (desktop to browser only) or `false`. |
+| `SELKIES_FILE_TRANSFERS` | `false` | `true` turns on file transfers through the browser, and the side panel's file panel with them. `upload` or `download` allows one direction only. |
+| `FILE_MANAGER_PATH` | `/config/Desktop` | Where uploads land, and the folder the file panel offers downloads from. MT5's and MetaEditor's file dialogs show the default one as *Desktop*. The panel can't choose another folder. `/mql5/Experts` puts uploaded EAs straight into MT5's Navigator, under *Expert Advisors → Mounted*. |
+| `MT5_AI_AGENTS` | off | `true` turns on MT5's and MetaEditor's servers for AI agents (below). |
+
+**For a reverse proxy, a VPN or host networking** (see *Reaching the desktop*):
+
+| Setting | Default | What it does |
+|---|---|---|
 | `TLS_CERT_FILE`, `TLS_KEY_FILE` | none | A certificate and key to serve, usually Docker secrets. Without them the container serves `/config/ssl/cert.pem` and `cert.key`. If they don't exist, it makes its own there: self-signed, issued to `localhost`, `127.0.0.1` and `::1`, unable to sign other certificates, and valid for 825 days. A start in its last 30 days renews it. You can put your own certificate in those two files instead; the container never touches it. A new certificate takes effect at the next container restart. |
 | `TRUSTED_PROXIES` | none | IP addresses or ranges, such as `10.250.10.10` or `10.8.0.0/24`. When set, only they get in, and everyone else gets 403. Requests from them have their `X-Forwarded-For` logged. |
 | `SELKIES_ALLOWED_ORIGINS` | none: the page's own origin only | Other origins allowed to open the stream, comma-separated, such as `https://mt5.example.com`. `*` is refused. |
+| `SUBFOLDER` | `/` | Serves the desktop under a path, such as `/mt5/`. |
 | `CUSTOM_HTTPS_PORT` | `3001` | The HTTPS port inside the container. |
 | `LISTEN_ADDRESS` | all of the container's addresses; `127.0.0.1` with host networking | The one address the HTTPS port listens on. |
-| `SUBFOLDER` | `/` | Serves the desktop under a path, such as `/mt5/`. |
-| `SELKIES_CLIPBOARD_ENABLED` | `true` | The shared clipboard: `true`, `in` (browser to desktop only), `out` (desktop to browser only) or `false`. |
-| `SELKIES_FILE_TRANSFERS` | `none` | `upload,download` turns on file transfers through the browser. Set `SELKIES_UI_SIDEBAR_SHOW_FILES=true` too, so the file panel shows. |
-| `FILE_MANAGER_PATH` | `/config/Desktop` | Where uploads land. The panel can't choose a folder, so point it at one, such as `/mql5/Experts`. |
-| `MQL5_MOUNT_NAME` | `Mounted` | The name of the EA folder's links in MT5. A plain folder name. |
-| `MT5_STOP_TIMEOUT` | `20` | Seconds, 1 to 20, that MT5 gets to close when the container stops. |
-| `MT5_AI_AGENTS` | off | `true` turns on MT5's and MetaEditor's servers for AI agents (below). |
+
+**Wine's own,** for troubleshooting:
+
+| Setting | Default | What it does |
+|---|---|---|
 | `WINEDEBUG` | `fixme-all,err-toolbar` | What Wine writes to the log: its errors, minus the noise from MT5's toolbar. During the first start's install, Wine writes nothing, unless you set `WINEDEBUG` yourself. For troubleshooting, `fixme-all` brings the toolbar's errors back, and an empty value restores Wine's defaults, which add its "fixme" notes. |
 | `WINEDLLOVERRIDES` | `mscoree,mshtml=` | Turns off Wine's Mono (.NET) and Gecko (Internet Explorer's engine), so Wine never stops to offer them; MT5 uses neither. A value of your own replaces this one, so keep those two in it. |
+
+**Other settings.** The base image's and Selkies' other settings, such as `SELKIES_ENCODER` or `LC_ALL`, reach them unchanged: nothing filters the container's environment. They aren't tested with this image. A value you set replaces the image's own, its protections included: `SELKIES_MICROPHONE_ENABLED=true` brings the microphone back, for instance. The refusals below still apply. Three have no effect, because the container replaces the base's web server setup with its own: `CUSTOM_PORT`, `CUSTOM_WS_PORT` and `DISABLE_IPV6`.
 
 **Refused:** the container stops at once, and its log says why in a `[mt5-access] REFUSED:` line. With `restart: unless-stopped`, `docker compose ps` then shows it *Restarting*. These settings remove a protection and have no use here:
 - no password, a file that can't be read, fewer than 12 characters, or a well-known placeholder;
@@ -356,12 +366,15 @@ Set these under `environment` in `compose.yaml` or your `compose.override.yaml`.
 - only one of `TLS_CERT_FILE` and `TLS_KEY_FILE`, a path with unusual characters, or a file that can't be read;
 - privileged mode (`privileged: true`, or `cap_add: SYS_ADMIN`), or the Docker socket mounted: the desktop would control the server;
 - `DEV_MODE`, `PIXELFLUX_WAYLAND=true`, `SELKIES_MODE=webrtc`, `SELKIES_ENABLE_DUAL_MODE=true`, `SELKIES_COMPUTER_USE_BIND`, or another `SELKIES_UNIX_SOCKET`. These are the base image's development mode, its Wayland desktop, WebRTC streaming, and extra servers outside the login;
-- a malformed `CUSTOM_HTTPS_PORT`, `CUSTOM_USER`, `SUBFOLDER` or `LISTEN_ADDRESS`.
+- a malformed `CUSTOM_HTTPS_PORT`, `CUSTOM_USER`, `SUBFOLDER` or `LISTEN_ADDRESS`;
+- a `SELKIES_FILE_TRANSFERS` or `SELKIES_CLIPBOARD_ENABLED` value other than those in the table: Selkies would read one such as `off` as on, both ways.
 
 **Warned about** in the log, because you might have a reason:
 - `PASSWORD` set directly;
 - `CUSTOM_PORT`, which has no effect: there's no plain HTTP;
 - `HARDEN_DESKTOP=false`: terminals come back, and `sudo` too without `no-new-privileges`;
+- `SELKIES_COMMAND_ENABLED=true`: the web page can run commands on the desktop, as a terminal would;
+- `DOCKER_MODS`: linuxserver's add-ons, which run as root at every start;
 - `no-new-privileges` off;
 - a `/config` that other users on the host can read;
 - host networking, and `MT5_AI_AGENTS=true` with host networking.
@@ -388,16 +401,16 @@ Set these under `environment` in `compose.yaml` or your `compose.override.yaml`.
 
 ## Stopping, restarts and health
 
-- **Stopping:** `docker compose stop demo`. MT5 gets a close request, as *File → Exit* sends, and saves its charts and settings; this usually takes about a second. The example's `stop_grace_period: 30s` gives it the time. Without Compose, use `docker stop -t 30 <container>`.
+- **Stopping:** `docker compose stop`. MT5 gets a close request, as *File → Exit* sends, and saves its charts and settings; this usually takes about a second. The example's `stop_grace_period: 30s` gives it the time. Without Compose, use `docker stop -t 30 <container>`.
 - **At every stop with a saved login, the log says the account file was put back:** "put back Config/accounts.dat from before the close". Under Wine, the copy of `accounts.dat` that MT5 writes while closing doesn't survive a container restart. At the next start MT5 would log "Accounts deleted due security reason" and not log in. So the copy from before the close is kept.
 - **If MT5 closes or crashes,** the desktop starts it again within seconds.
 - **The health check:** `docker compose ps` shows *healthy* when MT5 is running and the desktop answers.
   - It doesn't show whether MT5 is connected to the broker, or whether an EA is running. MT5's status bar and its Journal show that.
-  - `docker inspect --format '{{range .State.Health.Log}}{{.Output}}{{end}}' mt5-demo-1` shows why a check failed.
+  - `docker inspect --format '{{range .State.Health.Log}}{{.Output}}{{end}}' mt5-desktop-1` shows why a check failed.
   - The first start has 5 minutes before failed checks count.
 - **To stop trading in a hurry,** from mildest to strongest:
   1. Click **Algo Trading** in the terminal. No EA can trade, and positions stay open.
-  2. `docker compose stop live`. The terminal stops. Open positions keep their stop-loss and take-profit on the broker's server.
+  2. `docker compose stop`. The terminal stops. Open positions keep their stop-loss and take-profit on the broker's server.
   3. Close positions by hand, on the desktop or in your broker's app, then stop.
 
 ## Updates
@@ -409,7 +422,6 @@ Set these under `environment` in `compose.yaml` or your `compose.override.yaml`.
   - `sha-<commit>` names the source commit.
 - **Updating:** `docker compose pull && docker compose up -d`.
 - **Going back:** set the previous date tag in `image:`, then run the same command.
-- **For live,** consider a date tag that has already run on demo. Live then changes only when you change it.
 
 **Inside the container, two things update themselves,** whatever the image:
 - **MT5, through LiveUpdate.**
@@ -442,7 +454,7 @@ That's what a first start looked up, with MT5 idle afterwards. Your broker, and 
 
 - **ARM.** MT5 is a 64-bit Windows program, so the image is amd64 only.
 - **VNC.** The desktop streams to browsers only. VNC would mean a second login and a second open port.
-- **Microphone and webcam.** The desktop never uses your browser's microphone or camera.
+- **Microphone and webcam.** They're off, and untested with MT5.
 - **Python.** There's no Python bridge or API for MT5. Selkies, the desktop's streaming server, is itself a Python program; it listens only on a socket file inside the container.
 - **`init: true`, or `docker run --init`.** The image's own supervisor (s6) has to be process 1: with Docker's init, the container stops at once.
 - **EAs that need .NET.** Wine's Mono isn't included.
@@ -450,14 +462,14 @@ That's what a first start looked up, with MT5 idle afterwards. Your broker, and 
 
 ## Troubleshooting
 
-- **`docker compose logs demo`** has everything:
+- **`docker compose logs`** has everything:
   - the certificate, as an `[mt5-cert]` line when it's made or renewed;
   - the startup check, as `[mt5-access]` lines;
   - the install and every MT5 start, as `[mt5]` lines;
   - the stop, as `[mt5-stop]`;
   - nginx's log of logins and requests;
   - Wine's errors.
-- **MT5's start log** stays in `/config/log/mt5/run-terminal.log` (`data/demo/log/mt5/` on the host) across restarts.
+- **MT5's start log** stays in `/config/log/mt5/run-terminal.log` (`data/desktop/log/mt5/` on the host) across restarts.
 - **A failed install step** shows a small window on the desktop, and the log says why. It's tried again every 60 s: a lost download, or a signature check that failed because a revocation list couldn't be fetched, usually passes on a later try. A file whose signature is wrong is never run.
 - **Behind a proxy, the page loads but the desktop never appears:** the proxy probably replaces `Host`, and the container refuses the stream (see *Behind a reverse proxy*).
 - **More from Wine:** `WINEDEBUG=fixme-all`, or empty (see *Settings*).
@@ -490,11 +502,11 @@ tests/access.sh
 
 - `docker build --build-arg STRIP_WINE_DEBUG=false` keeps Wine's debug information, for crash backtraces with function names; the image grows by about 1 GB.
 - `tests/access.sh` checks the access layer: logins, refusals, origins, headers, certificates, listening ports. It needs no internet and leaves nothing behind. `--host` adds the host-networking test, which binds `127.0.0.1:3911` on the machine.
-- `tests/compose.dev.yaml` runs a local build with the example's settings, on its own ports (3201 and 3301), folders and password, next to a real deployment:
+- `tests/compose.dev.yaml` runs a local build with the example's settings, on its own port (3201), folders and password, next to a real deployment:
 
   ```sh
   docker compose -f compose.yaml -f tests/compose.dev.yaml build
-  docker compose -f compose.yaml -f tests/compose.dev.yaml up -d demo
+  docker compose -f compose.yaml -f tests/compose.dev.yaml up -d
   ```
 
 ## License

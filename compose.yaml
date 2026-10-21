@@ -1,75 +1,40 @@
-# mt5-desktop: an example deployment with two trading accounts, demo and live,
-# one container each. The README's quick start creates the folders and
-# password files it needs before the first start.
+# mt5-desktop: an example deployment, one container for one trading account.
+# The README's quick start creates the folders and the password file it needs
+# before the first start.
 name: mt5
 
-x-mt5: &mt5
-  image: ghcr.io/blunan/mt5-desktop:latest     # or a date tag such as :20261019, to stay on one build
-  restart: unless-stopped
-  stop_grace_period: 30s                       # time for MT5 to save its charts and settings
-  # Never add init: true. The image's own supervisor (s6) has to be process 1,
-  # and with Docker's init the container stops at once.
-  security_opt:
-    - no-new-privileges:true
-  cap_drop: [ALL]
-  cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]   # the desktop's startup needs all six
-  shm_size: 1gb
-  pids_limit: 2048
-  mem_limit: 4g                                # an open HTML pane (Help, Market) can reach this; Edge is stopped first, not MT5. 6g for heavy use of the panes
-  logging:
-    driver: local
-    options:
-      max-size: 10m
-      max-file: "5"
-
-x-env: &env
-  PUID: "1000"                                 # the user that owns ./data/* and ./ea on the host
-  PGID: "1000"
-  TZ: Etc/UTC
-  CUSTOM_USER: trader                          # the desktop's login name
-
 services:
-  demo:
-    <<: *mt5
-    cpus: 2                                    # leaves CPU for live during backtests
+  desktop:
+    image: ghcr.io/blunan/mt5-desktop:latest   # or a date tag such as :20261019, to stay on one build
+    restart: unless-stopped
+    stop_grace_period: 30s                     # time for MT5 to save its charts and settings
+    # Never add init: true. The image's own supervisor (s6) has to be process 1,
+    # and with Docker's init the container stops at once.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]   # the desktop's startup needs all six
+    shm_size: 1gb
+    pids_limit: 2048
+    mem_limit: 4g                              # an open HTML pane (Help, Market) can reach this; Edge is stopped first, not MT5. 6g for heavy use of the panes
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "5"
     environment:
-      <<: *env
-      TITLE: MT5 demo                          # the browser tab's name
-      FILE__PASSWORD: /run/secrets/demo_password
-      SELKIES_FILE_TRANSFERS: upload,download  # the image default is none
-      SELKIES_UI_SIDEBAR_SHOW_FILES: "true"    # the hardened desktop hides the file panel otherwise
-      FILE_MANAGER_PATH: /mql5/Experts         # uploads land here (the panel has no folder choice)
-    secrets: [demo_password]
+      PUID: "1000"                             # the user that owns ./data/desktop and ./ea on the host
+      PGID: "1000"
+      FILE__PASSWORD: /run/secrets/password
+    secrets: [password]
     volumes:
-      - ./data/demo:/config                    # bind mount: survives docker system prune --volumes
-      - ./ea:/mql5                             # optional EA folder, read-write here
+      - ./data/desktop:/config                 # bind mount: survives docker system prune --volumes
+      - ./ea:/mql5                             # optional: your EAs, indicators and scripts
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:3001:3001"
-    networks: [demo]
-
-  live:
-    <<: *mt5
-    # image: ghcr.io/blunan/mt5-desktop:20261019   # optional: keep live on a build that already ran on demo
-    cpu_shares: 2048                           # gets more CPU than demo when the VPS is busy
-    environment:
-      <<: *env
-      TITLE: MT5 LIVE
-      FILE__PASSWORD: /run/secrets/live_password
-    secrets: [live_password]
-    volumes:
-      - ./data/live:/config
-      - ./ea:/mql5:ro                          # same folder, read-only: EAs appear, can't be edited here
-    ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:3101:3001"
-    networks: [live]
-
-networks:                                      # one each: demo and live can't reach each other's desktop
-  demo: {}
-  live: {}
 
 secrets:
-  # One password per file, at least 12 characters. Make the files root's, so
-  # nothing inside the desktop can read them:
-  #   sudo chown root:root secrets/* && sudo chmod 0400 secrets/*
-  demo_password: { file: ./secrets/demo_password }
-  live_password: { file: ./secrets/live_password }
+  # One password in the file, at least 12 characters. Make the file root's, so
+  # nothing inside the desktop can read it:
+  #   sudo chown root:root secrets/password && sudo chmod 0400 secrets/password
+  password: { file: ./secrets/password }

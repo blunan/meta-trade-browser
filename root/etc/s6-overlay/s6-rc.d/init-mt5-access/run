@@ -14,7 +14,7 @@ htpasswd=/etc/nginx/.htpasswd
 socket_dir=/run/selkies
 socket="$socket_dir/selkies.sock"
 port="${CUSTOM_HTTPS_PORT:-3001}"
-user="${CUSTOM_USER:-abc}"
+user="${CUSTOM_USER:-trader}"
 subfolder="${SUBFOLDER:-/}"
 
 log() { printf '[mt5-access] %s\n' "$*"; }
@@ -106,6 +106,48 @@ for origin in "${origins[@]}"; do
       "Leave it empty (same origin only), or list your proxy's origins."
   fi
 done
+
+## File transfers and the clipboard. Selkies reads a value it doesn't know,
+## such as "off", as its default: on, both ways. So only the values listed
+## here pass.
+transfers="${SELKIES_FILE_TRANSFERS:-}"
+transfers="${transfers,,}"
+transfers="${transfers//[[:space:]]/}"
+case "$transfers" in
+  "" | none | false) transfers=none ;;
+  true | upload,download | download,upload) transfers=upload,download ;;
+  upload | download) ;;
+  *)
+    refuse "SELKIES_FILE_TRANSFERS must be true, false, upload, download or upload,download." \
+      "It's '${SELKIES_FILE_TRANSFERS}', which Selkies would read as upload and download both on." ;;
+esac
+printf '%s' "$transfers" > "$env_dir/SELKIES_FILE_TRANSFERS"
+# The file panel follows them, unless you set SELKIES_UI_SIDEBAR_SHOW_FILES
+# yourself: the image sets it to auto. (An empty value wouldn't do: the
+# startup environment drops it, and the base then writes false.)
+if [[ "${SELKIES_UI_SIDEBAR_SHOW_FILES:-}" == auto ]]; then
+  if [[ "$transfers" == none ]]; then
+    printf 'false' > "$env_dir/SELKIES_UI_SIDEBAR_SHOW_FILES"
+  else
+    printf 'true' > "$env_dir/SELKIES_UI_SIDEBAR_SHOW_FILES"
+  fi
+fi
+# The base copies SELKIES_CLIPBOARD_ENABLED to SELKIES_ENABLE_CLIPBOARD, the
+# one Selkies reads, unless that's set. Selkies ignores case, spaces and a
+# "|..." suffix, and reads empty as its default, true.
+clipboard_raw="${SELKIES_ENABLE_CLIPBOARD-${SELKIES_CLIPBOARD_ENABLED-}}"
+clipboard="${clipboard_raw%%|*}"
+clipboard="${clipboard,,}"
+clipboard="${clipboard//[[:space:]]/}"
+if [[ -z "$clipboard_raw" ]]; then
+  clipboard=true
+fi
+case "$clipboard" in
+  true | false | in | out) ;;
+  *)
+    refuse "SELKIES_CLIPBOARD_ENABLED must be true, false, in or out." \
+      "It's '$clipboard_raw', which Selkies would read as on, both ways." ;;
+esac
 
 ## TRUSTED_PROXIES: IP addresses or CIDR ranges, comma- or space-separated.
 trusted=()
@@ -211,6 +253,12 @@ fi
 harden="${HARDEN_DESKTOP:-}"
 if [[ "${harden,,}" != true ]]; then
   warn "HARDEN_DESKTOP is off: the desktop gets terminals back, and sudo too without no-new-privileges."
+fi
+if selkies_true "${SELKIES_COMMAND_ENABLED:-}"; then
+  warn "SELKIES_COMMAND_ENABLED=true: the web page can run commands on the desktop, as a terminal would."
+fi
+if [[ -n "${DOCKER_MODS:-}" ]]; then
+  warn "DOCKER_MODS is set: linuxserver's mods run as root at every start, and aren't tested with this image."
 fi
 if [[ "$(awk '/^NoNewPrivs:/ { print $2 }' /proc/self/status)" != 1 ]]; then
   warn "no-new-privileges is off. It's what keeps a desktop session from becoming root."
@@ -326,6 +374,6 @@ fi
 log "Listening on https://$listen$subfolder (HTTPS only). Host networking: $host_network."
 log "Login: user '$user', password $password_source, kept as a SHA-512 hash that only nginx can read."
 log "Certificate: $cert_source. Clients allowed: $allowed."
-log "Stream: same origin${SELKIES_ALLOWED_ORIGINS:+ and ${SELKIES_ALLOWED_ORIGINS}}; WebSockets only. Clipboard: ${SELKIES_CLIPBOARD_ENABLED:-true}. File transfers: ${SELKIES_FILE_TRANSFERS:-none}."
+log "Stream: same origin${SELKIES_ALLOWED_ORIGINS:+ and ${SELKIES_ALLOWED_ORIGINS}}; WebSockets only. Clipboard: $clipboard. File transfers: $transfers."
 log "MT5's AI-agent servers: $agents."
 log "Health check: /healthz on /run/mt5/health.sock (plain HTTP, inside the container only)."

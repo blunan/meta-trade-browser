@@ -3,9 +3,8 @@
 # stop-terminal.sh: the stop part of mt5-stop. When the container stops, s6
 # runs it while the desktop is still up. It asks MT5 to close, as File > Exit
 # does, so MT5 saves its charts and settings, and waits for it. Otherwise MT5
-# would be killed without saving.
-#   MT5_STOP_TIMEOUT  seconds to wait, 1 to 20 (default 20). s6 gives this
-#                     whole step 25 s at most (timeout-down).
+# would be killed without saving. It waits up to 20 s: s6 gives this whole
+# step 25 s at most (timeout-down).
 # MetaEditor isn't asked: a "Save changes?" dialog would just wait there.
 #
 # Under Wine, the Config/accounts.dat that MT5 writes while closing works only
@@ -27,12 +26,7 @@ fi
 log() { printf '%s [mt5-stop] %s\n' "$(date -u +%FT%TZ)" "$*" >> "$out"; }
 now_us() { echo "${EPOCHREALTIME//[!0-9]/}"; }
 
-timeout_s="${MT5_STOP_TIMEOUT:-20}"
-if [[ ! "$timeout_s" =~ ^[0-9]{1,2}$ ]] || (( 10#$timeout_s < 1 || 10#$timeout_s > 20 )); then
-  log "MT5_STOP_TIMEOUT must be 1 to 20 seconds; waiting up to 20"
-  timeout_s=20
-fi
-timeout_s=$((10#$timeout_s))
+timeout_s=20
 
 # While this file exists, run-terminal.sh sleeps instead of starting MT5, so
 # the watchdog can't bring MT5 back in the middle of the stop.

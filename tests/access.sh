@@ -70,7 +70,7 @@ hardening=(
   --cap-drop ALL
   --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER
   --cap-add SETUID --cap-add SETGID --cap-add KILL
-  -e PUID=1000 -e PGID=1000 -e TZ=Etc/UTC -e "CUSTOM_USER=$user"
+  -e PUID=1000 -e PGID=1000
 )
 # A password file as echo writes it, with a line break at the end.
 printf '%s\n' "$password" > "$tmp/password"
@@ -209,6 +209,14 @@ cert_days() {
     echo $(((e - s) / 86400))'
 }
 
+# selkies_env <name> <regex>: the variables in Selkies' environment that match,
+# sorted, on one line.
+selkies_env() {
+  local pid
+  pid="$(docker exec "$run-$1" pgrep -o -f 'selkies --addr')"
+  docker exec -u abc "$run-$1" sh -c "tr '\0' '\n' < /proc/$pid/environ | grep -E '$2' | sort | paste -s -d ' '"
+}
+
 # trusted <URL> <curl options...>: the HTTP status with the probe trusting
 # only /tmp/main.pem, the main container's own certificate. 000 when the
 # certificate isn't accepted for that name.
@@ -248,6 +256,9 @@ refused "T10: SYS_ADMIN (privileged)" "CAP_SYS_ADMIN" "${with_password[@]}" --ca
 refused "T10: only TLS_CERT_FILE" "only one of TLS_CERT_FILE" "${with_password[@]}" -e TLS_CERT_FILE=/config/ssl/cert.pem
 refused "T10: LISTEN_ADDRESS that isn't an address" "LISTEN_ADDRESS must be one IP address" "${with_password[@]}" -e LISTEN_ADDRESS=all
 refused "T10: SUBFOLDER without slashes" "SUBFOLDER must start and end with '/'" "${with_password[@]}" -e SUBFOLDER=mt5
+refused "T10: SELKIES_FILE_TRANSFERS=off" "SELKIES_FILE_TRANSFERS must be" "${with_password[@]}" -e SELKIES_FILE_TRANSFERS=off
+refused "T10: SELKIES_FILE_TRANSFERS=none|locked" "SELKIES_FILE_TRANSFERS must be" "${with_password[@]}" -e 'SELKIES_FILE_TRANSFERS=none|locked'
+refused "T10: SELKIES_CLIPBOARD_ENABLED=off" "SELKIES_CLIPBOARD_ENABLED must be" "${with_password[@]}" -e SELKIES_CLIPBOARD_ENABLED=off
 
 echo "Defaults (T2, T3, T5-T8, T13, T14, T16, T17, T19, T20)"
 start "$net" main "${with_password[@]}"
@@ -302,11 +313,9 @@ if ready main; then
   selkies_pid="$(docker exec "$run-main" pgrep -o -f 'selkies --addr')"
   check "T14: Selkies' environment has no PASSWORD" 0 \
     "$(docker exec -u abc "$run-main" sh -c "tr '\0' '\n' < /proc/$selkies_pid/environ | grep -c '^PASSWORD=' || true")"
-  check "T19: Selkies runs with sound, but without its own login, microphone, webcam, or audio and video settings" \
-    "SELKIES_AUDIO_ENABLED=true SELKIES_ENABLE_BASIC_AUTH=false SELKIES_MICROPHONE_ENABLED=false|locked SELKIES_UI_SIDEBAR_SHOW_AUDIO_SETTINGS=false|locked SELKIES_UI_SIDEBAR_SHOW_VIDEO_SETTINGS=false|locked SELKIES_WEBCAM_ENABLED=false|locked" \
-    "$(docker exec -u abc "$run-main" sh -c "tr '\0' '\n' < /proc/$selkies_pid/environ |
-      grep -E '^SELKIES_((AUDIO|MICROPHONE|WEBCAM)_ENABLED|ENABLE_BASIC_AUTH|UI_SIDEBAR_SHOW_(AUDIO|VIDEO)_SETTINGS)=' |
-      sort | paste -s -d ' '")"
+  check "T19: Selkies runs with sound, but without its own login, microphone, webcam, file transfers, or audio, video and file panels" \
+    "SELKIES_AUDIO_ENABLED=true SELKIES_ENABLE_BASIC_AUTH=false SELKIES_FILE_TRANSFERS=none SELKIES_MICROPHONE_ENABLED=false|locked SELKIES_UI_SIDEBAR_SHOW_AUDIO_SETTINGS=false|locked SELKIES_UI_SIDEBAR_SHOW_FILES=false SELKIES_UI_SIDEBAR_SHOW_VIDEO_SETTINGS=false|locked SELKIES_WEBCAM_ENABLED=false|locked" \
+    "$(selkies_env main '^SELKIES_((AUDIO|MICROPHONE|WEBCAM)_ENABLED|ENABLE_BASIC_AUTH|FILE_TRANSFERS|UI_SIDEBAR_SHOW_(AUDIO|VIDEO)_SETTINGS|UI_SIDEBAR_SHOW_FILES)=')"
   check "T20: the container's own certificate is issued to" "subject=O=mt5-desktop, CN=localhost" \
     "$(cert_field main -subject)"
   check "T20: ...for these names only" "DNS:localhost, IP Address:127.0.0.1, IP Address:0:0:0:0:0:0:0:1" \
@@ -380,9 +389,12 @@ fi
 docker rm -f "$run-proxies" > /dev/null
 
 echo "File transfers on (T18), SELKIES_ENABLE_BASIC_AUTH empty (T19), a certificate near its expiry (T20)"
-start "$net" files "${with_password[@]}" -e SELKIES_FILE_TRANSFERS=upload,download -e SELKIES_ENABLE_BASIC_AUTH=
+start "$net" files "${with_password[@]}" -e SELKIES_FILE_TRANSFERS=true -e SELKIES_ENABLE_BASIC_AUTH=
 if ready files; then
   t="$run-files:3001"
+  check "T18: SELKIES_FILE_TRANSFERS=true turns on both directions, and the file panel" \
+    "SELKIES_FILE_TRANSFERS=upload,download SELKIES_UI_SIDEBAR_SHOW_FILES=true" \
+    "$(selkies_env files '^SELKIES_(FILE_TRANSFERS|UI_SIDEBAR_SHOW_FILES)=')"
   check "T19: Selkies starts, its login off, when SELKIES_ENABLE_BASIC_AUTH is empty" false \
     "$(docker exec "$run-files" cat /run/s6/container_environment/SELKIES_ENABLE_BASIC_AUTH)"
   check "T18: upload" 200 \
@@ -452,13 +464,17 @@ if ready sidecar; then
 fi
 docker rm -f "$run-sidecar" "$run-tailnet" > /dev/null
 
-echo "SUBFOLDER=/mt5/ (T12)"
-start "$net" sub "${with_password[@]}" -e SUBFOLDER=/mt5/
+echo "SUBFOLDER=/mt5/ (T12), SELKIES_FILE_TRANSFERS=false (T8), SELKIES_COMMAND_ENABLED=true (warning)"
+start "$net" sub "${with_password[@]}" -e SUBFOLDER=/mt5/ -e SELKIES_FILE_TRANSFERS=false -e SELKIES_COMMAND_ENABLED=true
 if ready sub; then
   t="$run-sub:3001"
   check "T12: the desktop under /mt5/" 200 "$(code -u "$user:$password" "https://$t/mt5/")"
   check "T12: the stream under /mt5/" 101 "$(ws "$t" /mt5/api/websockets "https://$t")"
   check "T12: outside /mt5/" 404 "$(code -u "$user:$password" "https://$t/")"
+  check "T8: POST /api/upload with SELKIES_FILE_TRANSFERS=false" 403 \
+    "$(code -u "$user:$password" -X POST -H "Origin: https://$t" -F 'file=@/etc/hostname' "https://$t/mt5/api/upload")"
+  check_true "T8: the log says file transfers: none" logged sub "File transfers: none."
+  check_true "SELKIES_COMMAND_ENABLED=true is warned about" logged sub "WARNING: SELKIES_COMMAND_ENABLED=true"
 fi
 docker rm -f "$run-sub" > /dev/null
 
