@@ -1,6 +1,7 @@
 # mt5-desktop's nginx site. init-mt5-access renders it at every start, over
 # the base's site, and fills in the MT5_* placeholders and the files in
-# /etc/nginx/mt5/. HTTPS only: there is no plain-HTTP server.
+# /etc/nginx/mt5/. Two servers: the desktop, HTTPS only, and the container's
+# health check, on a socket file. There is no plain-HTTP port.
 
 # Requests from an address in TRUSTED_PROXIES get their X-Forwarded-For logged.
 # Nothing else uses that header, so the access checks below always judge the
@@ -12,12 +13,6 @@ geo $mt5_trusted_proxy {
 map $mt5_trusted_proxy $mt5_forwarded_for {
   1       $http_x_forwarded_for;
   default "-";
-}
-
-# The health check isn't logged.
-map $http_user_agent $mt5_log_request {
-  mt5-healthcheck 0;
-  default         1;
 }
 
 log_format mt5 '$remote_addr forwarded=$mt5_forwarded_for user=$remote_user '
@@ -41,7 +36,7 @@ server {
   add_header X-Content-Type-Options "nosniff" always;
   add_header Referrer-Policy "no-referrer" always;
 
-  access_log /dev/stdout mt5 if=$mt5_log_request;
+  access_log /dev/stdout mt5;
   error_log  /dev/stderr error;
 
   # Anything outside SUBFOLDER, when SUBFOLDER isn't "/".
@@ -69,5 +64,32 @@ server {
     proxy_request_buffering off;
     client_max_body_size    0;
     proxy_pass              http://unix:MT5_SOCKET:;
+  }
+}
+
+# The container's health check. A socket file, not a port: no certificate,
+# login or allowlist is involved, host networking doesn't share it, and
+# nothing outside the container can reach it. /healthz answers "ok" when
+# Selkies answers too, 500 when it doesn't.
+server {
+  listen unix:/run/mt5/health.sock;
+  access_log off;
+
+  location = /healthz {
+    auth_request /selkies;
+    default_type text/plain;
+    alias /etc/nginx/mt5/healthz;
+  }
+  # Selkies serves its page under SUBFOLDER.
+  location = /selkies {
+    internal;
+    proxy_pass              http://unix:MT5_SOCKET:MT5_SUBFOLDER;
+    proxy_pass_request_body off;
+    proxy_set_header        Content-Length "";
+    proxy_connect_timeout   5s;
+    proxy_read_timeout      5s;
+  }
+  location / {
+    return 404;
   }
 }

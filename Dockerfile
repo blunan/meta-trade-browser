@@ -107,11 +107,14 @@ find /etc/ssl/certs -lname '*ssl-cert-snakeoil.pem' -delete
 rm -f /etc/ssl/certs/ssl-cert-snakeoil.pem /etc/ssl/private/ssl-cert-snakeoil.key
 EOF
 
-# With host networking, nothing but nginx's port may be reachable:
-# - Selkies' socket file is shared with nginx through the group mt5sock, and
-#   Selkies creates it group-writable;
-# - Xvfb drops its abstract socket, which host networking would share.
-# Each edit is checked, so a base update that changes these scripts fails here.
+# Changes to the base's setup. Each edit is checked, so a base update that
+# changes these scripts fails here.
+# - With host networking, nothing but nginx's port may be reachable. Selkies'
+#   socket file is shared with nginx through the group mt5sock (Selkies
+#   creates it group-writable), and Xvfb drops its abstract socket, which
+#   host networking would share.
+# - nginx's health-check socket outlives a killed nginx, which then can't
+#   start again, so nginx's start script removes a leftover one first.
 RUN <<'EOF'
 #!/bin/bash
 set -euo pipefail
@@ -128,6 +131,11 @@ run=/etc/s6-overlay/s6-rc.d/svc-xorg/run
 test "$(grep -c '^ *-nolisten "tcp" \\$' "$run")" -eq 1
 sed -i 's/^\( *\)-nolisten "tcp" \\$/&\n\1-nolisten "local" \\/' "$run"
 test "$(grep -c '^ *-nolisten "local" \\$' "$run")" -eq 1
+
+run=/etc/s6-overlay/s6-rc.d/svc-nginx/run
+test "$(grep -c '^exec /usr/sbin/nginx ' "$run")" -eq 1
+sed -i 's|^exec /usr/sbin/nginx |rm -f /run/mt5/health.sock\n&|' "$run"
+test "$(grep -c -x 'rm -f /run/mt5/health.sock' "$run")" -eq 1
 EOF
 
 COPY root/ /

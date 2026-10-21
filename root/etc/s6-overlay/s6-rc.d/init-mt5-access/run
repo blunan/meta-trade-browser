@@ -236,15 +236,6 @@ if [[ "$address" == *:* ]]; then
 else
   listen="$address:$port"
 fi
-if [[ "$address" == 0.0.0.0 ]]; then
-  health_host=127.0.0.1
-elif [[ "$address" == :: ]]; then
-  health_host='[::1]'
-elif [[ "$address" == *:* ]]; then
-  health_host="[$address]"
-else
-  health_host="$address"
-fi
 if [[ "$host_network" == yes ]]; then
   warn "host networking: only nginx listens, on $listen, but MT5 and EAs can reach whatever listens on the host's own loopback."
 fi
@@ -280,8 +271,10 @@ mv -f "$htpasswd.new" "$htpasswd"
 rm -f "$env_dir/PASSWORD"
 unset password hash
 
-# 7. nginx's site.
+# 7. nginx's site: the desktop server, and the health-check server on
+# /run/mt5/health.sock, whose /healthz serves this file.
 mkdir -p "$conf_dir"
+printf 'ok\n' > "$conf_dir/healthz"
 : > "$conf_dir/allow.conf"
 : > "$conf_dir/trusted-proxies.geo"
 for net in "${trusted[@]}"; do
@@ -310,10 +303,7 @@ if ! nginx_test="$(nginx -t 2>&1)"; then
   refuse "nginx rejected its configuration:" "${lines[@]}"
 fi
 
-# 9. For the health check.
-printf 'https://%s:%s%s\n' "$health_host" "$port" "$subfolder" > /run/mt5/health-url
-
-# 10. What came out.
+# 9. What came out.
 if (( ${#trusted[@]} > 0 )); then
   allowed="only ${trusted[*]}"
 else
@@ -329,3 +319,4 @@ log "Login: user '$user', password $password_source, kept as a SHA-512 hash that
 log "Certificate: $cert_source. Clients allowed: $allowed."
 log "Stream: same origin${SELKIES_ALLOWED_ORIGINS:+ and ${SELKIES_ALLOWED_ORIGINS}}; WebSockets only. Clipboard: ${SELKIES_CLIPBOARD_ENABLED:-true}. File transfers: ${SELKIES_FILE_TRANSFERS:-none}."
 log "MT5's AI-agent servers: $agents."
+log "Health check: /healthz on /run/mt5/health.sock (plain HTTP, inside the container only)."

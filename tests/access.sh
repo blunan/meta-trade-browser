@@ -86,20 +86,35 @@ start() {
   docker run -d --name "$name" --network "$network" "${hardening[@]}" "$@" "$image" > /dev/null
 }
 
-# ready <name>: waits until Selkies' socket exists and nginx answers the
-# health-check URL (401, or 403 when TRUSTED_PROXIES leaves out 127.0.0.1).
+# health <name> [path]: the status of a request to the container's health-check
+# server, on its socket file. The path defaults to /healthz.
+health() {
+  docker exec "$run-$1" curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+    --unix-socket /run/mt5/health.sock "http://localhost${2:-/healthz}" 2> /dev/null || true
+}
+
+# until_health <name> <status>: waits up to 60 s for the health check to answer
+# that status; succeeds if it did.
+until_health() {
+  local _
+  for _ in $(seq 1 60); do
+    [[ "$(health "$1")" == "$2" ]] && return 0
+    sleep 1
+  done
+  return 1
+}
+
+# ready <name>: waits until the health check answers 200: nginx is up, and
+# Selkies answers through it.
 ready() {
-  local name="$run-$1" status _
+  local name="$run-$1" _
   for _ in $(seq 1 90); do
     if [[ "$(docker inspect -f '{{.State.Running}}' "$name" 2> /dev/null)" != true ]]; then
       fail "$1 stopped: $(docker logs "$name" 2>&1 | grep 'mt5-access' | tr '\n' ' ')"
       return 1
     fi
-    if docker exec "$name" test -S /run/selkies/selkies.sock 2> /dev/null; then
-      status="$(docker exec "$name" sh -c 'curl -sk -o /dev/null -w "%{http_code}" --max-time 5 "$(cat /run/mt5/health-url)"' 2> /dev/null || true)"
-      if [[ "$status" == 401 || "$status" == 403 ]]; then
-        return 0
-      fi
+    if [[ "$(health "$1")" == 200 ]]; then
+      return 0
     fi
     sleep 1
   done
@@ -265,15 +280,25 @@ if ready main; then
     "$(docker exec "$run-main" stat -c '%a %U:%G' /run/selkies /run/selkies/selkies.sock | tr '\n' ' ' | sed 's/ $//')"
   check "T17: switching the stream to WebRTC" 403 \
     "$(code -u "$user:$password" -X POST -H "Origin: https://$t" -H 'Content-Type: application/json' -d '{"mode": "webrtc"}' "https://$t/api/switch")"
-  check "WP4: health-check URL" "https://127.0.0.1:3001/" "$(docker exec "$run-main" cat /run/mt5/health-url)"
-  code -A mt5-healthcheck "https://$t/" > /dev/null
+  check "Health: /healthz answers without a login" "200 ok" \
+    "$(health main) $(docker exec "$run-main" curl -s --unix-socket /run/mt5/health.sock http://localhost/healthz)"
+  check "Health: other paths on the health socket" 404 "$(health main /)"
+  check "Health: the HTTPS port is the desktop, whatever the host name" 401 \
+    "$(code -H 'Host: localhost' "https://$t/")"
+  docker exec "$run-main" s6-svc -d /run/service/svc-selkies
+  check_true "Health: 500 while Selkies is down" until_health main 500
+  docker exec "$run-main" s6-svc -u /run/service/svc-selkies
+  check_true "Health: 200 once Selkies is back" until_health main 200
+  docker exec "$run-main" pkill -9 nginx
+  check_true "Health: nginx starts again after kill -9, despite its old socket" until_health main 200
+  check "Health: the login works after nginx's restart" 200 "$(code -u "$user:$password" "https://$t/")"
   code -A access-test-agent -u "$user:$password" "https://$t/" > /dev/null
   agent_line="$(docker logs "$run-main" 2>&1 | grep -F access-test-agent || true)"
   check_true "Q5: a request is logged with its user and status" grep -q "user=$user \[.*\" 200 " <<< "$agent_line"
-  if logged main mt5-healthcheck; then
-    fail "Q5: the health check is logged"
+  if logged main 'GET /healthz'; then
+    fail "Q5: health checks are logged"
   else
-    pass "Q5: the health check isn't logged"
+    pass "Q5: health checks aren't logged"
   fi
   docker restart "$run-main" > /dev/null
   if ready main; then
