@@ -31,13 +31,13 @@ theme:
         icon: material/brightness-4
         name: Follow the system setting
   features:
-    - navigation.sections
     - navigation.top
     - navigation.footer
     - content.code.copy
     - content.tabs.link
     - search.highlight
     - toc.follow
+    - toc.integrate                            # the page's headings in the left tree, no right panel
 
 plugins:
   - search
