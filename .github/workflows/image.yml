@@ -207,13 +207,28 @@ jobs:
             IMAGE_REVISION=${{ github.sha }}
             IMAGE_CREATED=${{ needs.test.outputs.created }}
 
+      # GHCR counts every read of a manifest as a download, so from here on the
+      # job reads the image's index and its amd64 manifest once each, through
+      # the registry's API, and nothing else: no inspect, no verify, no copy.
       - name: The pushed image is the tested one
+        working-directory: ${{ runner.temp }}
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
           TESTED: ${{ needs.test.outputs.layers }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          pushed="$(docker buildx imagetools inspect "$IMAGE@$DIGEST" --format '{{json .Image}}' |
-            jq -c 'if has("rootfs") then .rootfs.diff_ids else .["linux/amd64"].rootfs.diff_ids end')"
+          repo="${IMAGE#ghcr.io/}"
+          bearer="$(curl -fsS -u "$GITHUB_ACTOR:$TOKEN" "https://ghcr.io/token?scope=repository:$repo:pull" | jq -r .token)"
+          echo "::add-mask::$bearer"
+          get() { curl -fsSL -H "Authorization: Bearer $bearer" "$@"; }
+          get -H "Accept: application/vnd.oci.image.index.v1+json" -o index.json \
+            "https://ghcr.io/v2/$repo/manifests/$DIGEST"
+          [[ "sha256:$(sha256sum < index.json | cut -d ' ' -f 1)" == "$DIGEST" ]]
+          manifest="$(jq -r '.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest' index.json)"
+          get -H "Accept: application/vnd.oci.image.manifest.v1+json" -o manifest.json \
+            "https://ghcr.io/v2/$repo/manifests/$manifest"
+          get -o config.json "https://ghcr.io/v2/$repo/blobs/$(jq -r .config.digest manifest.json)"
+          pushed="$(jq -c .rootfs.diff_ids config.json)"
           if [[ "$pushed" != "$(jq -c . <<< "$TESTED")" ]]; then
             echo "The pushed image's layers differ from the tested image's:" >&2
             diff <(jq -r '.[]' <<< "$TESTED") <(jq -r '.[]' <<< "$pushed") >&2 || true
@@ -225,36 +240,50 @@ jobs:
         with:
           cosign-release: ${{ env.COSIGN_VERSION }}
 
-      - name: Sign the digest, then check the signature
+      # A signature that can't be made or stored fails here. Checking it again
+      # with cosign verify would only re-read what was just written.
+      - name: Sign the digest
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          cosign sign --yes "$IMAGE@$DIGEST"
-          cosign verify "$IMAGE@$DIGEST" --certificate-identity "$IDENTITY" \
-            --certificate-oidc-issuer "$ISSUER" > /dev/null
+        run: cosign sign --yes "$IMAGE@$DIGEST"
 
       # latest moves; a date tag never does (a second build that day gets .2);
-      # sha-<commit> names the first build of that commit.
+      # sha-<commit> names the first build of that commit. Existing tags come
+      # from the tag list, and each tag is a push of the index read above, so
+      # no other build is read.
       - name: Tag
+        working-directory: ${{ runner.temp }}
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          exists() { docker buildx imagetools inspect "$IMAGE:$1" > /dev/null 2>&1; }
+          repo="${IMAGE#ghcr.io/}"
+          bearer="$(curl -fsS -u "$GITHUB_ACTOR:$TOKEN" "https://ghcr.io/token?scope=repository:$repo:pull,push" | jq -r .token)"
+          echo "::add-mask::$bearer"
+          existing=()
+          url="https://ghcr.io/v2/$repo/tags/list?n=1000"
+          while [[ -n "$url" ]]; do
+            curl -fsS -H "Authorization: Bearer $bearer" -D headers -o page.json "$url"
+            mapfile -t -O "${#existing[@]}" existing < <(jq -r '.tags // [] | .[]' page.json)
+            next="$(tr -d '\r' < headers | sed -n -E 's/^[Ll]ink: *<([^>]*)>.*/\1/p')"
+            url="${next:+https://ghcr.io$next}"
+          done
+          has() { printf '%s\n' "${existing[@]}" | grep -qx -- "$1"; }
           day="$(date -u +%Y%m%d)"
           date_tag="$day"
           n=1
-          while exists "$date_tag"; do
+          while has "$date_tag"; do
             n=$((n + 1))
             date_tag="$day.$n"
           done
           tags=(latest "$date_tag")
-          exists "sha-${GITHUB_SHA::7}" || tags+=("sha-${GITHUB_SHA::7}")
-          args=()
-          for tag in "${tags[@]}"; do args+=(-t "$IMAGE:$tag"); done
-          docker buildx imagetools create "${args[@]}" "$IMAGE@$DIGEST"
+          has "sha-${GITHUB_SHA::7}" || tags+=("sha-${GITHUB_SHA::7}")
+          type="$(jq -r .mediaType index.json)"
           for tag in "${tags[@]}"; do
-            got="$(docker buildx imagetools inspect "$IMAGE:$tag" --format '{{json .Manifest}}' | jq -r .digest)"
-            [[ "$got" == "$DIGEST" ]] || { echo "$tag points to $got, not $DIGEST" >&2; exit 1; }
+            got="$(curl -fsS -X PUT -H "Authorization: Bearer $bearer" -H "Content-Type: $type" \
+              --data-binary @index.json -D - -o /dev/null "https://ghcr.io/v2/$repo/manifests/$tag" |
+              tr -d '\r' | sed -n -E 's/^[Dd]ocker-[Cc]ontent-[Dd]igest: *//p')"
+            [[ "$got" == "$DIGEST" ]] || { echo "$tag was stored as $got, not $DIGEST" >&2; exit 1; }
           done
           listed=""
           for tag in "${tags[@]}"; do listed+="\`$tag\` "; done
