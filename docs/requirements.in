@@ -1,0 +1,5 @@
+# The guide's build tool. Lock it into requirements.txt, with every package's
+# hash and only releases at least 14 days old (pip-tools, with pip 26 or later):
+#   cd docs && pip-compile --generate-hashes --strip-extras --no-emit-index-url \
+#     --pip-args "--uploaded-prior-to P14D" --output-file requirements.txt requirements.in
+mkdocs-material==9.7.7

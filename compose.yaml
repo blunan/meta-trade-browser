@@ -1,0 +1,26 @@
+# mt-browser: MetaTrader in your browser, one container for one trading account.
+# The quick start creates the folders and the password file first.
+services:
+  mt-browser:
+    image: ghcr.io/blunan/mt-browser:latest    # or a date tag such as :20261019, to stay on one build
+    container_name: mt-browser
+    restart: unless-stopped
+    stop_grace_period: 30s                     # time for MetaTrader to save its charts and settings
+    # Never add init: true: the image's own supervisor has to be process 1.
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]   # the desktop's startup needs all six
+    shm_size: 1gb
+    mem_limit: 4g                              # 6g for heavy use of the HTML panes (Help, Market)
+    environment:
+      FILE__PASSWORD: /run/secrets/password
+    secrets: [password]
+    volumes:
+      - ./data:/config                         # everything for the account
+      - ./ea:/mql5                             # optional: your EAs, indicators and scripts
+    ports:
+      - "127.0.0.1:3001:3001"                  # this machine only: an SSH tunnel or a proxy reaches it
+
+secrets:
+  password:
+    file: ./secrets/password

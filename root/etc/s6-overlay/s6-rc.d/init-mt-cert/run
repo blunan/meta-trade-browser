@@ -1,0 +1,70 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+# init-mt-cert: the desktop's own certificate, /config/ssl/cert.pem and
+# cert.key, served unless you give one in TLS_CERT_FILE. It runs before the
+# base's init-nginx, which then finds it and makes none of its own.
+#
+# It's issued to localhost, 127.0.0.1 and ::1, so it can be trusted on your
+# computer for the SSH tunnel's address, and it can't sign other certificates,
+# so trusting it vouches for nothing else. 825 days is the longest macOS
+# accepts for a server certificate; a start in its last 30 days renews it.
+#
+# A certificate of your own in /config/ssl is never touched. The one the base
+# makes (issued to "*" by "Linuxserver.io", and able to sign others) is
+# replaced.
+set -euo pipefail
+
+dir=/config/ssl
+cert="$dir/cert.pem"
+key="$dir/cert.key"
+own_subject='O=mt-browser, CN=localhost'
+base_subject='C=US, ST=CA, L=Carlsbad, O=Linuxserver.io, OU=LSIO Server, CN=*'
+renew_within=$((30 * 24 * 3600))
+
+log() { printf '[mt-cert] %s\n' "$*"; }
+
+action=
+if [[ ! -f "$cert" ]]; then
+  action=made
+else
+  subject="$(openssl x509 -in "$cert" -noout -subject 2> /dev/null || true)"
+  issuer="$(openssl x509 -in "$cert" -noout -issuer 2> /dev/null || true)"
+  if [[ "$subject" == "subject=$base_subject" ]]; then
+    action=replaced
+  elif [[ "$subject" == "subject=$own_subject" && "$issuer" == "issuer=$own_subject" ]] &&
+    ! openssl x509 -in "$cert" -noout -checkend "$renew_within" > /dev/null; then
+    action=renewed
+  fi
+fi
+if [[ -z "$action" ]]; then
+  exit 0
+fi
+
+mkdir -p "$dir"
+chown abc:abc "$dir"
+# Made next to the old one, then moved over it.
+new="$(mktemp -d "$dir/.new.XXXXXX")"
+trap 'rm -rf "$new"' EXIT
+if ! openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -sha256 -noenc -days 825 \
+  -subj '/O=mt-browser/CN=localhost' \
+  -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1' \
+  -addext 'basicConstraints=critical,CA:FALSE' \
+  -addext 'keyUsage=critical,digitalSignature' \
+  -addext 'extendedKeyUsage=serverAuth' \
+  -keyout "$new/cert.key" -out "$new/cert.pem" 2> "$new/openssl.log"; then
+  log "ERROR: the desktop's certificate couldn't be made:"
+  cat "$new/openssl.log"
+  exit 1
+fi
+chown abc:abc "$new/cert.key" "$new/cert.pem"
+chmod 0600 "$new/cert.key"
+chmod 0644 "$new/cert.pem"
+mv -f "$new/cert.key" "$key"
+mv -f "$new/cert.pem" "$cert"
+
+until="$(openssl x509 -in "$cert" -noout -enddate | cut -d= -f2)"
+case "$action" in
+  made) log "Made the desktop's own certificate, for localhost, 127.0.0.1 and ::1, valid until $until." ;;
+  replaced) log "Replaced the base image's certificate (issued to '*' by Linuxserver.io) with the desktop's own, for localhost, 127.0.0.1 and ::1, valid until $until." ;;
+  renewed) log "Renewed the desktop's own certificate, which had less than 30 days left. Valid until $until; trust it again where you trusted the old one." ;;
+esac

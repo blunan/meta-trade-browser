@@ -1,0 +1,379 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+# init-mt-access: checks the access settings, then writes nginx's site and
+# password file. It runs after the base's init-nginx and init-selkies-config,
+# and before any service starts. A refusal stops the container
+# (S6_BEHAVIOUR_IF_STAGE2_FAILS=2), so it never runs unprotected.
+set -euo pipefail
+
+env_dir=/run/s6/container_environment
+template=/defaults/nginx-site.conf.tmpl
+site=/etc/nginx/sites-available/default
+conf_dir=/etc/nginx/mt
+htpasswd=/etc/nginx/.htpasswd
+socket_dir=/run/selkies
+socket="$socket_dir/selkies.sock"
+port="${CUSTOM_HTTPS_PORT:-3001}"
+user="${CUSTOM_USER:-trader}"
+subfolder="${SUBFOLDER:-/}"
+
+log() { printf '[mt-access] %s\n' "$*"; }
+warn() { printf '[mt-access] WARNING: %s\n' "$*"; }
+refuse() {
+  printf '[mt-access] REFUSED: %s\n' "$1"
+  shift
+  local line
+  for line in "$@"; do
+    printf '[mt-access]   %s\n' "$line"
+  done
+  printf '[mt-access] The container stops here instead of starting unprotected.\n'
+  exit 1
+}
+
+# Selkies reads a setting as true when it's "true" or "1", ignoring case and a
+# "|locked" suffix.
+selkies_true() {
+  local value="${1%%|*}"
+  value="${value,,}"
+  value="${value//[[:space:]]/}"
+  [[ "$value" == true || "$value" == 1 ]]
+}
+
+# 1. Nothing from the last run carries over.
+rm -rf /run/mt
+install -d -m 0755 /run/mt
+
+# 2. The settings.
+
+## The password. init-envfile has copied FILE__PASSWORD's file, newline and
+## all, to $env_dir/PASSWORD; PASSWORD given directly is there too.
+if [[ ! -f "$env_dir/PASSWORD" ]]; then
+  if [[ -n "${FILE__PASSWORD:-}" ]]; then
+    refuse "the password file can't be read." \
+      "FILE__PASSWORD=${FILE__PASSWORD}" \
+      "Check the path and that the file is mounted into the container."
+  fi
+  refuse "no password." \
+    "Set FILE__PASSWORD to a file holding a password of at least 12 characters."
+fi
+password="$(cat "$env_dir/PASSWORD"; printf x)"
+password="${password%x}"
+newline=no
+if [[ "$password" == *$'\n' ]]; then
+  password="${password%$'\n'}"
+  password="${password%$'\r'}"
+  newline=yes
+fi
+if [[ "$password" =~ [[:cntrl:]] ]]; then
+  refuse "the password contains a line break or another character nobody can type."
+fi
+if (( ${#password} < 12 )); then
+  refuse "the password is shorter than 12 characters (it has ${#password})."
+fi
+case "${password,,}" in
+  password | changeme | securepassword | yourpassword | your-password | long-random-password)
+    refuse "the password is a well-known placeholder. Choose your own." ;;
+esac
+if [[ "$newline" == yes ]]; then
+  log "The password file ends in a line break. It's not part of the password."
+fi
+if [[ -n "${FILE__PASSWORD:-}" ]]; then
+  password_source="from FILE__PASSWORD"
+else
+  password_source="from PASSWORD"
+  warn "PASSWORD is set directly, so 'docker inspect' shows it. Put it in a file and set FILE__PASSWORD instead."
+fi
+
+## Values that end up in nginx's configuration or its password file.
+if [[ ! "$port" =~ ^[0-9]{1,5}$ ]] || (( 10#$port < 1 || 10#$port > 65535 )); then
+  refuse "CUSTOM_HTTPS_PORT must be a port number, 1 to 65535." "CUSTOM_HTTPS_PORT=$port"
+fi
+port=$((10#$port))
+if [[ ! "$user" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  refuse "CUSTOM_USER may contain only letters, digits, '.', '_' and '-'."
+fi
+if [[ ! "$subfolder" =~ ^/([A-Za-z0-9._~-]+/)*$ ]]; then
+  refuse "SUBFOLDER must start and end with '/' and contain only letters, digits, '.', '_', '~' and '-' between them." \
+    "SUBFOLDER=$subfolder"
+fi
+
+## Cross-site access to the stream.
+IFS=',' read -r -a origins <<< "${SELKIES_ALLOWED_ORIGINS:-}"
+for origin in "${origins[@]}"; do
+  origin="${origin%%|*}"
+  if [[ "${origin//[[:space:]]/}" == "*" ]]; then
+    refuse "SELKIES_ALLOWED_ORIGINS includes '*', which lets any website open the stream." \
+      "Leave it empty (same origin only), or list your proxy's origins."
+  fi
+done
+
+## File transfers and the clipboard. Selkies reads a value it doesn't know,
+## such as "off", as its default: on, both ways. So only the values listed
+## here pass.
+transfers="${SELKIES_FILE_TRANSFERS:-}"
+transfers="${transfers,,}"
+transfers="${transfers//[[:space:]]/}"
+case "$transfers" in
+  "" | none | false) transfers=none ;;
+  true | upload,download | download,upload) transfers=upload,download ;;
+  upload | download) ;;
+  *)
+    refuse "SELKIES_FILE_TRANSFERS must be true, false, upload, download or upload,download." \
+      "It's '${SELKIES_FILE_TRANSFERS}', which Selkies would read as upload and download both on." ;;
+esac
+printf '%s' "$transfers" > "$env_dir/SELKIES_FILE_TRANSFERS"
+# The file panel follows them, unless you set SELKIES_UI_SIDEBAR_SHOW_FILES
+# yourself: the image sets it to auto. (An empty value wouldn't do: the
+# startup environment drops it, and the base then writes false.)
+if [[ "${SELKIES_UI_SIDEBAR_SHOW_FILES:-}" == auto ]]; then
+  if [[ "$transfers" == none ]]; then
+    printf 'false' > "$env_dir/SELKIES_UI_SIDEBAR_SHOW_FILES"
+  else
+    printf 'true' > "$env_dir/SELKIES_UI_SIDEBAR_SHOW_FILES"
+  fi
+fi
+# The base copies SELKIES_CLIPBOARD_ENABLED to SELKIES_ENABLE_CLIPBOARD, the
+# one Selkies reads, unless that's set. Selkies ignores case, spaces and a
+# "|..." suffix, and reads empty as its default, true.
+clipboard_raw="${SELKIES_ENABLE_CLIPBOARD-${SELKIES_CLIPBOARD_ENABLED-}}"
+clipboard="${clipboard_raw%%|*}"
+clipboard="${clipboard,,}"
+clipboard="${clipboard//[[:space:]]/}"
+if [[ -z "$clipboard_raw" ]]; then
+  clipboard=true
+fi
+case "$clipboard" in
+  true | false | in | out) ;;
+  *)
+    refuse "SELKIES_CLIPBOARD_ENABLED must be true, false, in or out." \
+      "It's '$clipboard_raw', which Selkies would read as on, both ways." ;;
+esac
+
+## TRUSTED_PROXIES: IP addresses or CIDR ranges, comma- or space-separated.
+trusted=()
+if [[ -n "${TRUSTED_PROXIES:-}" ]]; then
+  if ! checked="$(python3 -I - "$TRUSTED_PROXIES" 2>&1 <<'EOF'
+import ipaddress
+import sys
+
+entries = sys.argv[1].replace(",", " ").split()
+for entry in entries:
+    try:
+        net = ipaddress.ip_network(entry, strict=False)
+    except ValueError:
+        sys.exit(f"'{entry}' isn't an IP address or a CIDR range.")
+    if net.prefixlen == 0:
+        sys.exit(f"'{entry}' covers every address.")
+    print(net)
+EOF
+)"; then
+    refuse "TRUSTED_PROXIES: $checked" \
+      "List your proxies' IP addresses or CIDR ranges, such as 172.20.0.5 or 10.8.0.0/24."
+  fi
+  mapfile -t trusted <<< "$checked"
+fi
+
+## Plain HTTP doesn't exist here.
+if [[ -n "${CUSTOM_PORT:-}" ]]; then
+  warn "CUSTOM_PORT is set, but there is no plain HTTP. Only HTTPS listens, on CUSTOM_HTTPS_PORT ($port)."
+fi
+
+## The certificate.
+cert=/config/ssl/cert.pem
+key=/config/ssl/cert.key
+if [[ -n "${TLS_CERT_FILE:-}" || -n "${TLS_KEY_FILE:-}" ]]; then
+  if [[ -z "${TLS_CERT_FILE:-}" || -z "${TLS_KEY_FILE:-}" ]]; then
+    refuse "only one of TLS_CERT_FILE and TLS_KEY_FILE is set. Set both, or neither."
+  fi
+  for file in "$TLS_CERT_FILE" "$TLS_KEY_FILE"; do
+    if [[ ! "$file" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
+      refuse "TLS_CERT_FILE and TLS_KEY_FILE must be plain absolute paths." "$file"
+    fi
+    if [[ ! -f "$file" || ! -s "$file" ]]; then
+      refuse "the certificate or key file can't be read." "$file"
+    fi
+  done
+  cert="$TLS_CERT_FILE"
+  key="$TLS_KEY_FILE"
+  cert_source="TLS_CERT_FILE"
+elif [[ -f /config/ssl/cert.pem && -f /config/ssl/cert.key ]]; then
+  cert_source="/config/ssl"
+else
+  refuse "no certificate in /config/ssl, and none given in TLS_CERT_FILE."
+fi
+
+## Settings with no use here that would remove a protection.
+cap_eff="$(awk '/^CapEff:/ { print $2 }' /proc/self/status)"
+if (( (16#$cap_eff >> 21) & 1 )); then
+  refuse "the container has CAP_SYS_ADMIN (privileged mode, or cap_add SYS_ADMIN)." \
+    "The desktop would then control the host. Remove 'privileged' and SYS_ADMIN."
+fi
+docker_socket=no
+if [[ -S /var/run/docker.sock || -S /run/docker.sock ]]; then
+  docker_socket=yes
+fi
+while read -r _ _ _ _ mount_point _; do
+  if [[ "$mount_point" == *docker.sock ]]; then
+    docker_socket=yes
+  fi
+done < /proc/self/mountinfo
+if [[ "$docker_socket" == yes ]]; then
+  refuse "the Docker socket is mounted. The desktop would then control the host."
+fi
+if [[ -n "${DEV_MODE+x}" ]]; then
+  refuse "DEV_MODE is set. The base would install Node.js and run a development server at every start."
+fi
+wayland="${PIXELFLUX_WAYLAND:-}"
+if [[ "${wayland,,}" == true ]]; then
+  refuse "PIXELFLUX_WAYLAND=true. This image runs X11 only: in Wayland mode MetaTrader never starts."
+fi
+selkies_mode="${SELKIES_MODE:-}"
+selkies_mode="${selkies_mode%%|*}"
+if [[ "${selkies_mode,,}" == *webrtc* ]] || selkies_true "${SELKIES_ENABLE_DUAL_MODE:-}"; then
+  refuse "WebRTC streaming (SELKIES_MODE=webrtc or SELKIES_ENABLE_DUAL_MODE=true)." \
+    "WebRTC needs UDP ports, and by default sends the stream through public STUN and TURN servers."
+fi
+if [[ -n "${SELKIES_COMPUTER_USE_BIND:-}" ]]; then
+  refuse "SELKIES_COMPUTER_USE_BIND starts another HTTP server, on a port of its own, outside nginx's login."
+fi
+if [[ "${SELKIES_UNIX_SOCKET:-}" != "$socket" ]]; then
+  refuse "SELKIES_UNIX_SOCKET must stay $socket. nginx's site and the socket folder are made for it."
+fi
+# Selkies' own login. nginx does the login, and the password never reaches
+# Selkies (step 6). With its login on, Selkies wouldn't start without one, and
+# unset means on.
+if selkies_true "${SELKIES_ENABLE_BASIC_AUTH:-}"; then
+  refuse "SELKIES_ENABLE_BASIC_AUTH=true. nginx does the login, and Selkies never gets the password, so it couldn't start."
+fi
+if [[ -z "${SELKIES_ENABLE_BASIC_AUTH:-}" ]]; then
+  printf 'false' > "$env_dir/SELKIES_ENABLE_BASIC_AUTH"
+fi
+
+## Settings that loosen things for a reason you might have.
+harden="${HARDEN_DESKTOP:-}"
+if [[ "${harden,,}" != true ]]; then
+  warn "HARDEN_DESKTOP is off: the desktop gets terminals back, and sudo too without no-new-privileges."
+fi
+if selkies_true "${SELKIES_COMMAND_ENABLED:-}"; then
+  warn "SELKIES_COMMAND_ENABLED=true: the web page can run commands on the desktop, as a terminal would."
+fi
+if [[ -n "${DOCKER_MODS:-}" ]]; then
+  warn "DOCKER_MODS is set: linuxserver's mods run as root at every start, and aren't tested with this image."
+fi
+if [[ "$(awk '/^NoNewPrivs:/ { print $2 }' /proc/self/status)" != 1 ]]; then
+  warn "no-new-privileges is off. It's what keeps a desktop session from becoming root."
+fi
+config_mode="$(stat -c '%a' /config)"
+if (( 8#$config_mode & 8#007 )); then
+  warn "/config is open to other users on the host (mode $config_mode). It holds saved broker logins: run 'chmod 700' on the host folder."
+fi
+
+# 3. The listen address. Host networking shows a network card with hardware
+# behind it, or Docker's host-side interfaces. A VPN sidecar's tun0 or
+# tailscale0 doesn't count.
+host_network=no
+for dev in /sys/class/net/*; do
+  name="${dev##*/}"
+  if [[ -e "$dev/device" || "$name" == docker0 || "$name" == docker_gwbridge || "$name" == br-* || "$name" == veth* ]]; then
+    host_network=yes
+    break
+  fi
+done
+if [[ -n "${LISTEN_ADDRESS:-}" ]]; then
+  if ! address="$(python3 -I -c 'import ipaddress, sys; print(ipaddress.ip_address(sys.argv[1]))' "$LISTEN_ADDRESS" 2>/dev/null)"; then
+    refuse "LISTEN_ADDRESS must be one IP address." "LISTEN_ADDRESS=$LISTEN_ADDRESS"
+  fi
+elif [[ "$host_network" == yes ]]; then
+  address=127.0.0.1
+else
+  address=0.0.0.0
+fi
+if [[ "$address" == *:* ]]; then
+  listen="[$address]:$port"
+else
+  listen="$address:$port"
+fi
+if [[ "$host_network" == yes ]]; then
+  warn "host networking: only nginx listens, on $listen, but MetaTrader and EAs can reach whatever listens on the host's own loopback."
+fi
+if [[ "${MT_AI_AGENTS:-}" == true && "$host_network" == yes ]]; then
+  warn "MT_AI_AGENTS=true with host networking: MetaTrader's AI-agent servers listen on the host's loopback, protected only by their API key."
+fi
+
+# 4. Selkies' socket folder. Only Selkies' user (abc) and nginx's (www-data,
+# through the group mtsock) can reach the socket. The setgid bit gives the
+# socket that group; abc sets it, because without CAP_FSETID the kernel
+# silently drops it when root does.
+mkdir -p "$socket_dir"
+chown abc:mtsock "$socket_dir"
+chmod 0750 "$socket_dir"
+s6-setuidgid abc chmod g+s "$socket_dir"
+if [[ "$(stat -c '%a %U %G' "$socket_dir")" != "2750 abc mtsock" ]]; then
+  refuse "couldn't prepare $socket_dir for Selkies' socket." "$(stat -c '%A %U %G' "$socket_dir")"
+fi
+
+# 5. The password hash: SHA-512 crypt, readable by nginx only. It replaces the
+# base's MD5-based file, which everyone in the container could read.
+hash="$(printf '%s\n' "$password" | openssl passwd -6 -stdin)"
+(
+  umask 077
+  printf '%s:%s\n' "$user" "$hash" > "$htpasswd.new"
+)
+chown root:www-data "$htpasswd.new"
+chmod 0640 "$htpasswd.new"
+mv -f "$htpasswd.new" "$htpasswd"
+
+# 6. The services that start next, the desktop and MetaTrader among them, never get
+# the plain-text password.
+rm -f "$env_dir/PASSWORD"
+unset password hash
+
+# 7. nginx's site: the desktop server, and the health-check server on
+# /run/mt/health.sock, whose /healthz serves this file.
+mkdir -p "$conf_dir"
+printf 'ok\n' > "$conf_dir/healthz"
+: > "$conf_dir/allow.conf"
+: > "$conf_dir/trusted-proxies.geo"
+for net in "${trusted[@]}"; do
+  printf 'allow %s;\n' "$net" >> "$conf_dir/allow.conf"
+  printf '%s 1;\n' "$net" >> "$conf_dir/trusted-proxies.geo"
+done
+if (( ${#trusted[@]} > 0 )); then
+  printf 'deny all;\n' >> "$conf_dir/allow.conf"
+fi
+if [[ "$subfolder" == / ]]; then
+  : > "$conf_dir/outside-subfolder.conf"
+else
+  printf 'location / {\n  return 404;\n}\n' > "$conf_dir/outside-subfolder.conf"
+fi
+sed \
+  -e "s|MT_LISTEN|$listen|g" \
+  -e "s|MT_CERT|$cert|g" \
+  -e "s|MT_KEY|$key|g" \
+  -e "s|MT_SUBFOLDER|$subfolder|g" \
+  -e "s|MT_SOCKET|$socket|g" \
+  "$template" > "$site"
+
+# 8. Let nginx check it.
+if ! nginx_test="$(nginx -t 2>&1)"; then
+  mapfile -t lines <<< "$nginx_test"
+  refuse "nginx rejected its configuration:" "${lines[@]}"
+fi
+
+# 9. What came out.
+if (( ${#trusted[@]} > 0 )); then
+  allowed="only ${trusted[*]}"
+else
+  allowed="anyone who can reach the port (TRUSTED_PROXIES isn't set)"
+fi
+if [[ "${MT_AI_AGENTS:-}" == true ]]; then
+  agents="on (MT_AI_AGENTS=true)"
+else
+  agents="off"
+fi
+log "Listening on https://$listen$subfolder (HTTPS only). Host networking: $host_network."
+log "Login: user '$user', password $password_source, kept as a SHA-512 hash that only nginx can read."
+log "Certificate: $cert_source. Clients allowed: $allowed."
+log "Stream: same origin${SELKIES_ALLOWED_ORIGINS:+ and ${SELKIES_ALLOWED_ORIGINS}}; WebSockets only. Clipboard: $clipboard. File transfers: $transfers."
+log "MetaTrader's AI-agent servers: $agents."
+log "Health check: /healthz on /run/mt/health.sock (plain HTTP, inside the container only)."

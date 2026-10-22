@@ -1,0 +1,85 @@
+# The guide at https://mt-browser.blunan.com/, built by .github/workflows/docs.yml.
+# Preview it locally: see docs/building.md.
+site_name: mt-browser
+site_description: MetaTrader in your browser, in a hardened container.
+site_url: https://mt-browser.blunan.com/
+repo_url: https://github.com/blunan/mt-browser
+repo_name: blunan/mt-browser
+edit_uri: ""
+copyright: Copyright &copy; 2026 Brayan Luna &middot; GPL-3.0
+exclude_docs: |
+  requirements.*
+
+theme:
+  name: material
+  font: false                                  # system fonts: no requests to Google Fonts
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Follow the system setting
+  features:
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - content.tabs.link
+    - search.highlight
+    - toc.follow
+    - toc.integrate                            # the page's headings in the left tree, no right panel
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets:
+      base_path: [.]
+      check_paths: true
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Quick start: quick-start.md
+      - Folders and files: folders.md
+  - Using it:
+      - Reaching the desktop: access.md
+      - Behind a reverse proxy: reverse-proxy.md
+      - Using MetaTrader: using.md
+      - Settings: settings.md
+  - Running it:
+      - Stopping, restarts and health: operations.md
+      - Updates: updates.md
+      - Troubleshooting: troubleshooting.md
+  - Reference:
+      - What it connects to: network.md
+      - What isn't supported: limitations.md
+      - Verify the image: verify.md
+      - Build it yourself: building.md

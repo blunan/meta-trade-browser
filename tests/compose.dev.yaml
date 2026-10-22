@@ -1,0 +1,27 @@
+# A local build of the image, run with the example's settings, next to a real
+# deployment on the same machine: its own project name, container name, port,
+# folders and password, so nothing here touches the real one. On top of the
+# example:
+#   docker compose -f compose.yaml -f tests/compose.dev.yaml build
+#   docker compose -f compose.yaml -f tests/compose.dev.yaml up -d
+# Paths are relative to the first file's folder, the repository's root.
+# mem_limit stays the example's 4g, so tests see what users get.
+name: mt-dev
+
+services:
+  mt-browser:
+    image: mt-browser:dev
+    build: .
+    container_name: mt-browser-dev
+    restart: "no"                              # a test run doesn't come back after a reboot
+    environment:
+      TITLE: MetaTrader dev
+    volumes:
+      - ./dev/data:/config
+      - ./dev/ea:/mql5
+    ports: !override
+      - "127.0.0.1:3201:3001"
+
+secrets:
+  password:
+    file: ./secrets/dev_password
