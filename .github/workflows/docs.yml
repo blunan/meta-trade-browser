@@ -1,6 +1,7 @@
 # Builds the guide from docs/ and publishes it to GitHub Pages, at
 # https://mt-browser.blunan.com/ (the domain is set in the repository's Pages
 # settings, not in a CNAME file). Pull requests only build and check it.
+# "Docs build" is a required check, so it runs on every PR, in about 20 s.
 name: docs
 
 on:
@@ -13,22 +14,18 @@ on:
       - README.md
       - .github/workflows/docs.yml
   pull_request:
-    paths:
-      - docs/**
-      - mkdocs.yml
-      - compose.yaml
-      - README.md
-      - .github/workflows/docs.yml
   workflow_dispatch:
 
 permissions: {}
 
+# Deploys queue one after another; a PR's runs have their own group.
 concurrency:
-  group: pages
+  group: ${{ github.event_name == 'pull_request' && format('docs-{0}', github.ref) || 'pages' }}
   cancel-in-progress: false
 
 jobs:
   build:
+    name: Docs build
     runs-on: ubuntu-24.04
     permissions:
       contents: read
