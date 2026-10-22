@@ -3,6 +3,8 @@
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-mt--browser.blunan.com-526CFE?logo=materialformkdocs&logoColor=white)](https://mt-browser.blunan.com/)
 [![Image](https://img.shields.io/badge/image-ghcr.io%2Fblunan%2Fmt--browser-2496ED?logo=docker&logoColor=white)](https://github.com/blunan/mt-browser/pkgs/container/mt-browser)
+[![Image build](https://github.com/blunan/mt-browser/actions/workflows/image.yml/badge.svg?branch=main)](https://github.com/blunan/mt-browser/actions/workflows/image.yml)
+[![Signed with cosign](https://img.shields.io/badge/signed-cosign-6D28D9)](https://mt-browser.blunan.com/verify/)
 ![Platform: linux/amd64](https://img.shields.io/badge/platform-linux%2Famd64-lightgrey?logo=linux&logoColor=white)
 ![MetaTrader 5](https://img.shields.io/badge/MetaTrader-5-4A76B8)
 ![Wine staging](https://img.shields.io/badge/Wine-staging-800000?logo=wine&logoColor=white)

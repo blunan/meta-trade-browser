@@ -4,8 +4,9 @@
 
 - **Tags:**
     - `latest` follows every new build;
-    - a date tag, such as `20261019`, stays on one build;
-    - `sha-<commit>` names the source commit.
+    - a date tag, such as `20261019`, stays on one build. A second build that day gets `20261019.2`;
+    - `sha-<commit>` names the first build of that source commit.
+- **New builds** come with every change to the image, and every Monday, when the image is rebuilt with Debian's and the base image's updates.
 - **Going back:** use the previous date tag in place of `latest`, the same way.
 
 To update:
