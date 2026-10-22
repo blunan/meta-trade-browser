@@ -13,3 +13,7 @@ ea/
 # Local-only material
 ignore/
 *.code-workspace
+
+# The guide's build output and its local Python environment (docs/building.md)
+site/
+.venv/

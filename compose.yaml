@@ -1,5 +1,5 @@
 # mt-browser: MetaTrader in your browser, one container for one trading account.
-# The README's quick start creates the folders and the password file first.
+# The quick start creates the folders and the password file first.
 services:
   mt-browser:
     image: ghcr.io/blunan/mt-browser:latest    # or a date tag such as :20261019, to stay on one build

@@ -1,0 +1,29 @@
+# mt-browser
+
+MetaTrader in your browser. The MetaTrader terminal and MetaEditor run on a small Linux desktop inside a container, and you use them from any browser as you would on your own computer: charts, Expert Advisors (EAs, the MQL5 programs that trade from a chart), MetaEditor and the Strategy Tester. One container runs one trading account.
+
+It installs MetaTrader 5, MetaQuotes' current release, and runs it under WineHQ staging (Wine runs Windows programs on Linux) on [linuxserver.io's Selkies desktop](https://github.com/linuxserver/docker-baseimage-selkies), Debian 13. It's secure by default:
+
+- a password is required, and the desktop is served over HTTPS only;
+- Docker publishes it on the server's loopback address, `127.0.0.1`, unless you choose another;
+- other websites can't open your desktop's stream or embed its page;
+- the desktop has no terminal and no `sudo`;
+- MetaQuotes' installer and Microsoft's WebView2 installer are downloaded at the first start, and run only if their code signatures check out. The image itself contains no MetaQuotes or Microsoft software.
+
+Not affiliated with MetaQuotes or Microsoft.
+
+## What you need
+
+- A Linux server with Docker Engine, on amd64 (x86-64). MetaTrader is a 64-bit Windows program, and there's no ARM build. Docker Compose v2 is optional: `docker run` works too.
+- About 4 GB of memory, and about 5 GB of disk once MetaTrader has run for a while. The image itself takes about 4 GB.
+- A way to reach the server: SSH is enough.
+
+Then follow the [quick start](quick-start.md).
+
+## License
+
+Copyright (C) 2026 Brayan Luna
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 3. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See [LICENSE](https://github.com/blunan/mt-browser/blob/main/LICENSE) for the full text.
+
+The image is built on [linuxserver.io's](https://www.linuxserver.io/) Selkies base image, also GPL-3.0. At the first start it downloads MetaQuotes' MetaTrader 5 and Microsoft's Edge WebView2 Runtime from their publishers. They come under their own license terms, not this project's. This project isn't affiliated with or endorsed by MetaQuotes or Microsoft.
