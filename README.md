@@ -24,7 +24,7 @@ It installs MetaTrader 5, MetaQuotes' current release, and runs it under WineHQ 
 * 📂 **Your EAs, your folder** — an optional folder of your EAs, indicators and scripts appears in MetaTrader as `Mounted`.
 * 💾 **Clean stops** — MetaTrader saves its charts and settings at every stop, and starts again by itself if it closes or crashes.
 
-> ⚠️ Not affiliated with MetaQuotes or Microsoft.
+> ⚠️ Not affiliated with or endorsed by MetaQuotes or Microsoft.
 
 ## 📋 Table of contents
 
