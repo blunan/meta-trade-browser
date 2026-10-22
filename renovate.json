@@ -1,0 +1,26 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Update PRs for the base image's digest, the workflows' actions, and the cosign and Trivy versions. Nothing merges by itself.",
+  "extends": ["config:recommended"],
+  "dependencyDashboard": true,
+  "minimumReleaseAge": "14 days",
+  "internalChecksFilter": "strict",
+  "ignorePaths": ["docs/requirements.in", "docs/requirements.txt"],
+  "packageRules": [
+    {
+      "description": "GHCR gives image digests no release date, so the base image's updates can't wait 14 days: review and the PR's Image tests are the gate.",
+      "matchDatasources": ["docker"],
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Tool versions in the workflows, marked with a '# renovate:' comment.",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\s+[A-Z_]+: (?<currentValue>\\S+)"
+      ]
+    }
+  ]
+}
