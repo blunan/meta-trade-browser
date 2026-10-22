@@ -448,8 +448,9 @@ if ready tls; then
   check_true "T9: TLS 1.2 accepted" grep -q '^New, TLSv1.2, Cipher is [A-Z]' <<< "$(tls -tls1_2)"
   check_true "T9: TLS 1.3 accepted" grep -q '^New, TLSv1.3, Cipher is [A-Z]' <<< "$(tls -tls1_3)"
   check_true "T9: TLS 1.1 refused" grep -q '^New, (NONE), Cipher is (NONE)' <<< "$(tls '-tls1_1 -cipher DEFAULT@SECLEVEL=0')"
-  # A certificate of your own in /config/ssl.
-  docker exec -u abc "$run-tls" sh -c 'cp /run/secrets/tls.crt /config/ssl/cert.pem && cp /run/secrets/tls.key /config/ssl/cert.key'
+  # A certificate of your own in /config/ssl. The key file belongs to whoever
+  # runs this script, so root copies it, and hands it to the desktop's user.
+  docker exec "$run-tls" sh -c 'cp /run/secrets/tls.crt /config/ssl/cert.pem && cp /run/secrets/tls.key /config/ssl/cert.key && chown abc:abc /config/ssl/cert.pem /config/ssl/cert.key'
   own="$(docker exec "$run-tls" sha256sum /config/ssl/cert.pem)"
   docker restart "$run-tls" > /dev/null
   if ready tls; then
