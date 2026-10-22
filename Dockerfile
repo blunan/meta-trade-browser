@@ -2,29 +2,9 @@
 # mt-browser: MetaTrader in the browser, on linuxserver's Selkies desktop.
 FROM ghcr.io/linuxserver/baseimage-selkies:debiantrixie@sha256:5b3f10459933740554081efbca9c8d5e006faf5116b54ab40b7bfad7c8111849
 
-# CI passes the real values; a local build is "dev".
-ARG IMAGE_VERSION=dev
-ARG IMAGE_REVISION=
-ARG IMAGE_CREATED=
 # Wine's Windows DLLs carry debug information that only crash backtraces use.
 # Stripping it saves about 1 GB unpacked. Set to false for a troubleshooting build.
 ARG STRIP_WINE_DEBUG=true
-
-# Every label the base sets describes the base, so each one is replaced.
-LABEL org.opencontainers.image.title="mt-browser" \
-      org.opencontainers.image.description="MetaTrader in the browser: WineHQ staging on linuxserver's Selkies desktop, secure by default. Not affiliated with MetaQuotes or Microsoft." \
-      org.opencontainers.image.authors="Brayan Luna" \
-      org.opencontainers.image.vendor="Brayan Luna" \
-      org.opencontainers.image.licenses="GPL-3.0-only" \
-      org.opencontainers.image.source="https://github.com/blunan/mt-browser" \
-      org.opencontainers.image.url="https://github.com/blunan/mt-browser" \
-      org.opencontainers.image.documentation="https://github.com/blunan/mt-browser#readme" \
-      org.opencontainers.image.version="${IMAGE_VERSION}" \
-      org.opencontainers.image.revision="${IMAGE_REVISION}" \
-      org.opencontainers.image.created="${IMAGE_CREATED}" \
-      org.opencontainers.image.ref.name="" \
-      build_version="mt-browser version ${IMAGE_VERSION}" \
-      maintainer="Brayan Luna"
 
 # Same-origin streaming only, no commands from the web page, no switch to
 # WebRTC, and Selkies on a socket file that only nginx can reach. MetaTrader's
@@ -199,6 +179,28 @@ actual="$(for f in "$tmp"/*.pem; do openssl x509 -in "$f" -noout -fingerprint -s
 rm -rf "$tmp"
 test "$actual" = "$(sort <<< "$expected")"
 EOF
+
+# The labels and their values come last: every RUN after an ARG sees that
+# ARG's value, so a new version or date earlier on would rebuild every layer.
+# CI passes the real values; a local build is "dev".
+ARG IMAGE_VERSION=dev
+ARG IMAGE_REVISION=
+ARG IMAGE_CREATED=
+# Every label the base sets describes the base, so each one is replaced.
+LABEL org.opencontainers.image.title="mt-browser" \
+      org.opencontainers.image.description="MetaTrader in the browser: WineHQ staging on linuxserver's Selkies desktop, secure by default. Not affiliated with MetaQuotes or Microsoft." \
+      org.opencontainers.image.authors="Brayan Luna" \
+      org.opencontainers.image.vendor="Brayan Luna" \
+      org.opencontainers.image.licenses="GPL-3.0-only" \
+      org.opencontainers.image.source="https://github.com/blunan/mt-browser" \
+      org.opencontainers.image.url="https://github.com/blunan/mt-browser" \
+      org.opencontainers.image.documentation="https://github.com/blunan/mt-browser#readme" \
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
+      org.opencontainers.image.revision="${IMAGE_REVISION}" \
+      org.opencontainers.image.created="${IMAGE_CREATED}" \
+      org.opencontainers.image.ref.name="" \
+      build_version="mt-browser version ${IMAGE_VERSION}" \
+      maintainer="Brayan Luna"
 
 # Healthy while MetaTrader runs and the desktop answers. The first start installs for
 # about 2 minutes, which the start period covers.
