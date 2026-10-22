@@ -1,6 +1,6 @@
 #!/usr/bin/with-contenv bash
 # shellcheck shell=bash
-# init-mt5-cert: the desktop's own certificate, /config/ssl/cert.pem and
+# init-mt-cert: the desktop's own certificate, /config/ssl/cert.pem and
 # cert.key, served unless you give one in TLS_CERT_FILE. It runs before the
 # base's init-nginx, which then finds it and makes none of its own.
 #
@@ -17,11 +17,11 @@ set -euo pipefail
 dir=/config/ssl
 cert="$dir/cert.pem"
 key="$dir/cert.key"
-own_subject='O=mt5-desktop, CN=localhost'
+own_subject='O=mt-browser, CN=localhost'
 base_subject='C=US, ST=CA, L=Carlsbad, O=Linuxserver.io, OU=LSIO Server, CN=*'
 renew_within=$((30 * 24 * 3600))
 
-log() { printf '[mt5-cert] %s\n' "$*"; }
+log() { printf '[mt-cert] %s\n' "$*"; }
 
 action=
 if [[ ! -f "$cert" ]]; then
@@ -46,7 +46,7 @@ chown abc:abc "$dir"
 new="$(mktemp -d "$dir/.new.XXXXXX")"
 trap 'rm -rf "$new"' EXIT
 if ! openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -sha256 -noenc -days 825 \
-  -subj '/O=mt5-desktop/CN=localhost' \
+  -subj '/O=mt-browser/CN=localhost' \
   -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1' \
   -addext 'basicConstraints=critical,CA:FALSE' \
   -addext 'keyUsage=critical,digitalSignature' \

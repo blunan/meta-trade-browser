@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Access-layer tests for the mt5-desktop image.
+# Access-layer tests for the mt-browser image.
 #
 # Each configuration runs the image on an internal Docker network, which has
-# no internet: MT5's first-start downloads fail at once, and the access layer
-# doesn't need MT5. Other containers of the same image probe it with curl and
+# no internet: MetaTrader's first-start downloads fail at once, and the access layer
+# doesn't need MetaTrader. Other containers of the same image probe it with curl and
 # openssl, so no host port is used, except by --host. Everything the script
 # starts is removed when it ends.
 #
 # Usage: tests/access.sh [--host] [image]
 #   --host  also run T15, host networking on the host's 127.0.0.1:3911. It
 #           binds a port on this machine, so it runs only when asked.
-#   image   defaults to mt5-desktop:dev.
+#   image   defaults to mt-browser:dev.
 set -euo pipefail
 
 host_test=no
@@ -18,9 +18,9 @@ if [[ "${1:-}" == --host ]]; then
   host_test=yes
   shift
 fi
-image="${1:-mt5-desktop:dev}"
+image="${1:-mt-browser:dev}"
 
-run="mt5-access-$$"
+run="mt-access-$$"
 net="$run-net"
 tmp="$(mktemp -d)"
 user=trader
@@ -70,7 +70,6 @@ hardening=(
   --cap-drop ALL
   --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER
   --cap-add SETUID --cap-add SETGID --cap-add KILL
-  -e PUID=1000 -e PGID=1000
 )
 # A password file as echo writes it, with a line break at the end.
 printf '%s\n' "$password" > "$tmp/password"
@@ -90,7 +89,7 @@ start() {
 # server, on its socket file. The path defaults to /healthz.
 health() {
   docker exec "$run-$1" curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
-    --unix-socket /run/mt5/health.sock "http://localhost${2:-/healthz}" 2> /dev/null || true
+    --unix-socket /run/mt/health.sock "http://localhost${2:-/healthz}" 2> /dev/null || true
 }
 
 # until_health <name> <status>: waits up to 60 s for the health check to answer
@@ -110,7 +109,7 @@ ready() {
   local name="$run-$1" _
   for _ in $(seq 1 90); do
     if [[ "$(docker inspect -f '{{.State.Running}}' "$name" 2> /dev/null)" != true ]]; then
-      fail "$1 stopped: $(docker logs "$name" 2>&1 | grep 'mt5-access' | tr '\n' ' ')"
+      fail "$1 stopped: $(docker logs "$name" 2>&1 | grep 'mt-access' | tr '\n' ' ')"
       return 1
     fi
     if [[ "$(health "$1")" == 200 ]]; then
@@ -134,7 +133,7 @@ refused() {
     [[ "$state" == exited ]] && break
     sleep 1
   done
-  reason="$(docker logs "$name" 2>&1 | grep -F '[mt5-access] REFUSED:' || true)"
+  reason="$(docker logs "$name" 2>&1 | grep -F '[mt-access] REFUSED:' || true)"
   if [[ "$state" == exited ]] && grep -qF -- "$text" <<< "$reason"; then
     pass "$description"
   else
@@ -255,7 +254,7 @@ refused "T10: the Docker socket mounted" "Docker socket is mounted" "${with_pass
 refused "T10: SYS_ADMIN (privileged)" "CAP_SYS_ADMIN" "${with_password[@]}" --cap-add SYS_ADMIN
 refused "T10: only TLS_CERT_FILE" "only one of TLS_CERT_FILE" "${with_password[@]}" -e TLS_CERT_FILE=/config/ssl/cert.pem
 refused "T10: LISTEN_ADDRESS that isn't an address" "LISTEN_ADDRESS must be one IP address" "${with_password[@]}" -e LISTEN_ADDRESS=all
-refused "T10: SUBFOLDER without slashes" "SUBFOLDER must start and end with '/'" "${with_password[@]}" -e SUBFOLDER=mt5
+refused "T10: SUBFOLDER without slashes" "SUBFOLDER must start and end with '/'" "${with_password[@]}" -e SUBFOLDER=mt
 refused "T10: SELKIES_FILE_TRANSFERS=off" "SELKIES_FILE_TRANSFERS must be" "${with_password[@]}" -e SELKIES_FILE_TRANSFERS=off
 refused "T10: SELKIES_FILE_TRANSFERS=none|locked" "SELKIES_FILE_TRANSFERS must be" "${with_password[@]}" -e 'SELKIES_FILE_TRANSFERS=none|locked'
 refused "T10: SELKIES_CLIPBOARD_ENABLED=off" "SELKIES_CLIPBOARD_ENABLED must be" "${with_password[@]}" -e SELKIES_CLIPBOARD_ENABLED=off
@@ -292,12 +291,12 @@ if ready main; then
     for n in xterm st stterm uxterm lxterminal gnome-terminal konsole xfce4-terminal terminator foot weston-terminal; do
       p=$(command -v "$n" 2> /dev/null) && [ -x "$p" ] && echo "$n"
     done; true')"
-  # By the programs the menu runs: MT5's own terminal64.exe isn't a terminal.
+  # By the programs the menu runs: MetaTrader's own terminal64.exe isn't a terminal.
   check "T13: terminals in the menu" 0 \
     "$(docker exec "$run-main" sh -c 'sed -n "s|.*<command>\([^ <]*\).*|\1|p" /config/.config/openbox/menu.xml |
       xargs -r -n 1 basename |
       grep -c -x -E "xterm|st|stterm|uxterm|lxterminal|gnome-terminal|konsole|xfce4-terminal|terminator|foot|weston-terminal|x-terminal-emulator" || true')"
-  check "T13: the menu's entries" "MetaTrader 5,MetaEditor" \
+  check "T13: the menu's entries" "MetaTrader,MetaEditor" \
     "$(docker exec "$run-main" sh -c 'sed -n "s|.*<item label=\"\([^\"]*\)\".*|\1|p" /config/.config/openbox/menu.xml | paste -s -d ,')"
   env_json="$(docker inspect -f '{{json .Config.Env}}' "$run-main")"
   check_true "T14: docker inspect shows the password file's path" grep -qF 'FILE__PASSWORD=/run/secrets/password' <<< "$env_json"
@@ -308,6 +307,8 @@ if ready main; then
   fi
   check "T14: the plain-text password left the startup environment" no \
     "$(docker exec "$run-main" sh -c '[ -e /run/s6/container_environment/PASSWORD ] && echo yes || echo no')"
+  check "T14: /config belongs to the desktop's user, 1000:1000 by default" "1000:1000" \
+    "$(docker exec "$run-main" stat -c '%u:%g' /config)"
   check "T14: password file owner and mode" "640 root:www-data" "$(docker exec "$run-main" stat -c '%a %U:%G' /etc/nginx/.htpasswd)"
   check "T14: password hash type" "$user:\$6\$" "$(docker exec "$run-main" cut -c1-$((${#user} + 4)) /etc/nginx/.htpasswd)"
   selkies_pid="$(docker exec "$run-main" pgrep -o -f 'selkies --addr')"
@@ -316,14 +317,14 @@ if ready main; then
   check "T19: Selkies runs with sound, but without its own login, microphone, webcam, file transfers, or audio, video and file panels" \
     "SELKIES_AUDIO_ENABLED=true SELKIES_ENABLE_BASIC_AUTH=false SELKIES_FILE_TRANSFERS=none SELKIES_MICROPHONE_ENABLED=false|locked SELKIES_UI_SIDEBAR_SHOW_AUDIO_SETTINGS=false|locked SELKIES_UI_SIDEBAR_SHOW_FILES=false SELKIES_UI_SIDEBAR_SHOW_VIDEO_SETTINGS=false|locked SELKIES_WEBCAM_ENABLED=false|locked" \
     "$(selkies_env main '^SELKIES_((AUDIO|MICROPHONE|WEBCAM)_ENABLED|ENABLE_BASIC_AUTH|FILE_TRANSFERS|UI_SIDEBAR_SHOW_(AUDIO|VIDEO)_SETTINGS|UI_SIDEBAR_SHOW_FILES)=')"
-  check "T20: the container's own certificate is issued to" "subject=O=mt5-desktop, CN=localhost" \
+  check "T20: the container's own certificate is issued to" "subject=O=mt-browser, CN=localhost" \
     "$(cert_field main -subject)"
   check "T20: ...for these names only" "DNS:localhost, IP Address:127.0.0.1, IP Address:0:0:0:0:0:0:0:1" \
     "$(cert_field main -ext subjectAltName)"
   check "T20: ...and can't sign others" "CA:FALSE" "$(cert_field main -ext basicConstraints)"
   check "T20: ...for TLS servers only" "TLS Web Server Authentication" "$(cert_field main -ext extendedKeyUsage)"
   check "T20: ...valid for 825 days" 825 "$(cert_days main)"
-  check_true "T20: the log says it was made" logged main "[mt5-cert] Made the desktop's own certificate"
+  check_true "T20: the log says it was made" logged main "[mt-cert] Made the desktop's own certificate"
   docker exec "$run-main" cat /config/ssl/cert.pem | docker exec -i "$run-probe" sh -c 'cat > /tmp/main.pem'
   main_ip="$(ip_of main)"
   check "T20: trusted, it's accepted for localhost" 401 \
@@ -331,16 +332,16 @@ if ready main; then
   check "T20: trusted, it's accepted for 127.0.0.1" 401 \
     "$(trusted "https://127.0.0.1:3001/" --connect-to "127.0.0.1:3001:$main_ip:3001")"
   check "T20: trusted, it's refused for any other name" 000 \
-    "$(trusted "https://mt5.example.com:3001/" --resolve "mt5.example.com:3001:$main_ip")"
+    "$(trusted "https://mt.example.com:3001/" --resolve "mt.example.com:3001:$main_ip")"
   check "T16: listening sockets (only HTTPS on 3001)" "00000000:0BB9" "$(listeners main)"
   check "T16: listening abstract sockets" 0 \
     "$(docker exec "$run-main" sh -c 'awk "NR > 1 && \$4 == \"00010000\" && \$8 ~ /^@/" /proc/net/unix | wc -l')"
-  check "T16: Selkies' socket folder and socket" "2750 abc:mt5sock 775 abc:mt5sock" \
+  check "T16: Selkies' socket folder and socket" "2750 abc:mtsock 775 abc:mtsock" \
     "$(docker exec "$run-main" stat -c '%a %U:%G' /run/selkies /run/selkies/selkies.sock | tr '\n' ' ' | sed 's/ $//')"
   check "T17: switching the stream to WebRTC" 403 \
     "$(code -u "$user:$password" -X POST -H "Origin: https://$t" -H 'Content-Type: application/json' -d '{"mode": "webrtc"}' "https://$t/api/switch")"
   check "Health: /healthz answers without a login" "200 ok" \
-    "$(health main) $(docker exec "$run-main" curl -s --unix-socket /run/mt5/health.sock http://localhost/healthz)"
+    "$(health main) $(docker exec "$run-main" curl -s --unix-socket /run/mt/health.sock http://localhost/healthz)"
   check "Health: other paths on the health socket" 404 "$(health main /)"
   check "Health: the HTTPS port is the desktop, whatever the host name" 401 \
     "$(code -H 'Host: localhost' "https://$t/")"
@@ -368,9 +369,9 @@ if ready main; then
     check "Restart: the login still works" 200 "$(code -u "$user:$password" "https://$t/")"
     check "Restart: the plain-text password left the startup environment again" no \
       "$(docker exec "$run-main" sh -c '[ -e /run/s6/container_environment/PASSWORD ] && echo yes || echo no')"
-    check "T20: the base's certificate is replaced at a start" "subject=O=mt5-desktop, CN=localhost" \
+    check "T20: the base's certificate is replaced at a start" "subject=O=mt-browser, CN=localhost" \
       "$(cert_field main -subject)"
-    check_true "T20: the log says so" logged main "[mt5-cert] Replaced the base image's certificate"
+    check_true "T20: the log says so" logged main "[mt-cert] Replaced the base image's certificate"
   fi
 fi
 docker rm -f "$run-main" > /dev/null
@@ -405,13 +406,17 @@ if ready files; then
     security_headers -u "$user:$password" "https://$t/api/files/"
   check "T18: download" "$(docker exec "$run-probe" cat /etc/hostname)" \
     "$(docker exec "$run-probe" curl -sk --max-time 5 -u "$user:$password" "https://$t/api/files/access-test.txt" || true)"
+  check "T18: the upload is in MetaTrader's Experts folder" yes \
+    "$(docker exec "$run-files" sh -c '[ -f "/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts/access-test.txt" ] && echo yes || echo no')"
+  check "T18: the folder's spaces made no stray folders" no \
+    "$(docker exec "$run-files" sh -c '[ -e /config/.wine/drive_c/Program ] && echo yes || echo no')"
   # The container's own certificate, 10 days from expiry.
   docker exec -u abc "$run-files" openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -noenc -days 10 \
-    -subj /O=mt5-desktop/CN=localhost -out /config/ssl/cert.pem -keyout /config/ssl/cert.key > /dev/null 2>&1
+    -subj /O=mt-browser/CN=localhost -out /config/ssl/cert.pem -keyout /config/ssl/cert.key > /dev/null 2>&1
   docker restart "$run-files" > /dev/null
   if ready files; then
     check "T20: a start in its last 30 days renews it" 825 "$(cert_days files)"
-    check_true "T20: the log says so" logged files "[mt5-cert] Renewed the desktop's own certificate"
+    check_true "T20: the log says so" logged files "[mt-cert] Renewed the desktop's own certificate"
   fi
 fi
 docker rm -f "$run-files" > /dev/null
@@ -427,7 +432,7 @@ fi
 docker rm -f "$run-plain" > /dev/null
 
 echo "TLS_CERT_FILE and TLS_KEY_FILE (T9), a certificate of your own in /config/ssl (T20)"
-openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=mt5-access-test \
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=mt-access-test \
   -keyout "$tmp/tls.key" -out "$tmp/tls.crt" 2> /dev/null
 start "$net" tls "${with_password[@]}" \
   -v "$tmp/tls.crt:/run/secrets/tls.crt:ro" -v "$tmp/tls.key:/run/secrets/tls.key:ro" \
@@ -439,7 +444,7 @@ if ready tls; then
   tls() {
     docker exec "$run-probe" sh -c "echo | openssl s_client -connect $run-tls:3001 $1 2>&1" || true
   }
-  check_true "T9: the given certificate is served" grep -q 'subject=.*CN *= *mt5-access-test' <<< "$(tls '')"
+  check_true "T9: the given certificate is served" grep -q 'subject=.*CN *= *mt-access-test' <<< "$(tls '')"
   check_true "T9: TLS 1.2 accepted" grep -q '^New, TLSv1.2, Cipher is [A-Z]' <<< "$(tls -tls1_2)"
   check_true "T9: TLS 1.3 accepted" grep -q '^New, TLSv1.3, Cipher is [A-Z]' <<< "$(tls -tls1_3)"
   check_true "T9: TLS 1.1 refused" grep -q '^New, (NONE), Cipher is (NONE)' <<< "$(tls '-tls1_1 -cipher DEFAULT@SECLEVEL=0')"
@@ -464,15 +469,15 @@ if ready sidecar; then
 fi
 docker rm -f "$run-sidecar" "$run-tailnet" > /dev/null
 
-echo "SUBFOLDER=/mt5/ (T12), SELKIES_FILE_TRANSFERS=false (T8), SELKIES_COMMAND_ENABLED=true (warning)"
-start "$net" sub "${with_password[@]}" -e SUBFOLDER=/mt5/ -e SELKIES_FILE_TRANSFERS=false -e SELKIES_COMMAND_ENABLED=true
+echo "SUBFOLDER=/mt/ (T12), SELKIES_FILE_TRANSFERS=false (T8), SELKIES_COMMAND_ENABLED=true (warning)"
+start "$net" sub "${with_password[@]}" -e SUBFOLDER=/mt/ -e SELKIES_FILE_TRANSFERS=false -e SELKIES_COMMAND_ENABLED=true
 if ready sub; then
   t="$run-sub:3001"
-  check "T12: the desktop under /mt5/" 200 "$(code -u "$user:$password" "https://$t/mt5/")"
-  check "T12: the stream under /mt5/" 101 "$(ws "$t" /mt5/api/websockets "https://$t")"
-  check "T12: outside /mt5/" 404 "$(code -u "$user:$password" "https://$t/")"
+  check "T12: the desktop under /mt/" 200 "$(code -u "$user:$password" "https://$t/mt/")"
+  check "T12: the stream under /mt/" 101 "$(ws "$t" /mt/api/websockets "https://$t")"
+  check "T12: outside /mt/" 404 "$(code -u "$user:$password" "https://$t/")"
   check "T8: POST /api/upload with SELKIES_FILE_TRANSFERS=false" 403 \
-    "$(code -u "$user:$password" -X POST -H "Origin: https://$t" -F 'file=@/etc/hostname' "https://$t/mt5/api/upload")"
+    "$(code -u "$user:$password" -X POST -H "Origin: https://$t" -F 'file=@/etc/hostname' "https://$t/mt/api/upload")"
   check_true "T8: the log says file transfers: none" logged sub "File transfers: none."
   check_true "SELKIES_COMMAND_ENABLED=true is warned about" logged sub "WARNING: SELKIES_COMMAND_ENABLED=true"
 fi

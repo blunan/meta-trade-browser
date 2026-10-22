@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# mt5-desktop: MetaTrader 5 in the browser, on linuxserver's Selkies desktop.
+# mt-browser: MetaTrader in the browser, on linuxserver's Selkies desktop.
 FROM ghcr.io/linuxserver/baseimage-selkies:debiantrixie@sha256:5b3f10459933740554081efbca9c8d5e006faf5116b54ab40b7bfad7c8111849
 
 # CI passes the real values; a local build is "dev".
@@ -11,31 +11,35 @@ ARG IMAGE_CREATED=
 ARG STRIP_WINE_DEBUG=true
 
 # Every label the base sets describes the base, so each one is replaced.
-LABEL org.opencontainers.image.title="mt5-desktop" \
-      org.opencontainers.image.description="MetaTrader 5 in the browser: WineHQ staging on linuxserver's Selkies desktop, secure by default. Not affiliated with MetaQuotes or Microsoft." \
+LABEL org.opencontainers.image.title="mt-browser" \
+      org.opencontainers.image.description="MetaTrader in the browser: WineHQ staging on linuxserver's Selkies desktop, secure by default. Not affiliated with MetaQuotes or Microsoft." \
       org.opencontainers.image.authors="Brayan Luna" \
       org.opencontainers.image.vendor="Brayan Luna" \
       org.opencontainers.image.licenses="GPL-3.0-only" \
-      org.opencontainers.image.source="https://github.com/blunan/trader-bot" \
-      org.opencontainers.image.url="https://github.com/blunan/trader-bot" \
-      org.opencontainers.image.documentation="https://github.com/blunan/trader-bot#readme" \
+      org.opencontainers.image.source="https://github.com/blunan/mt-browser" \
+      org.opencontainers.image.url="https://github.com/blunan/mt-browser" \
+      org.opencontainers.image.documentation="https://github.com/blunan/mt-browser#readme" \
       org.opencontainers.image.version="${IMAGE_VERSION}" \
       org.opencontainers.image.revision="${IMAGE_REVISION}" \
       org.opencontainers.image.created="${IMAGE_CREATED}" \
       org.opencontainers.image.ref.name="" \
-      build_version="mt5-desktop version ${IMAGE_VERSION}" \
+      build_version="mt-browser version ${IMAGE_VERSION}" \
       maintainer="Brayan Luna"
 
 # Same-origin streaming only, no commands from the web page, no switch to
-# WebRTC, and Selkies on a socket file that only nginx can reach. MT5's sounds
-# play in the browser, but the microphone and webcam are locked off, and their
-# buttons leave the side panel. The side panel has no video or audio settings
-# (the audio ones include a microphone picker). Selkies' own login stays off
-# (the base sets it; init-mt5-access makes sure). The login name is trader.
-# The file panel shows when file transfers are on: init-mt5-access sets it,
-# unless you do.
-ENV TITLE=MetaTrader5 \
+# WebRTC, and Selkies on a socket file that only nginx can reach. MetaTrader's
+# sounds play in the browser, but the microphone and webcam are locked off, and
+# their buttons leave the side panel. The side panel has no video or audio
+# settings (the audio ones include a microphone picker). Selkies' own login
+# stays off (the base sets it; init-mt-access makes sure). The login name is
+# trader, and the desktop's user is 1000:1000. The file panel shows when file
+# transfers are on (init-mt-access sets it, unless you do), and uploads land
+# in MetaTrader's own Experts folder.
+ENV TITLE=MetaTrader \
     CUSTOM_USER=trader \
+    PUID=1000 \
+    PGID=1000 \
+    FILE_MANAGER_PATH="/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts" \
     PIXELFLUX_WAYLAND=false \
     WINEPREFIX=/config/.wine \
     WINEDEBUG=fixme-all,err-toolbar \
@@ -121,7 +125,7 @@ EOF
 # Changes to the base's setup. Each edit is checked, so a base update that
 # changes these scripts fails here.
 # - With host networking, nothing but nginx's port may be reachable. Selkies'
-#   socket file is shared with nginx through the group mt5sock (Selkies
+#   socket file is shared with nginx through the group mtsock (Selkies
 #   creates it group-writable), and Xvfb drops its abstract socket, which
 #   host networking would share.
 # - nginx's health-check socket outlives a killed nginx, which then can't
@@ -132,12 +136,14 @@ EOF
 #   left out now.
 # - The startup log keeps the image's branding but not linuxserver's request
 #   for donations, which would read as this image's.
+# - The upload folder, FILE_MANAGER_PATH, has spaces in its path, so nginx's
+#   setup script quotes it when it creates the folder.
 RUN <<'EOF'
 #!/bin/bash
 set -euo pipefail
-groupadd --system mt5sock
-usermod -aG mt5sock abc
-usermod -aG mt5sock www-data
+groupadd --system mtsock
+usermod -aG mtsock abc
+usermod -aG mtsock www-data
 
 run=/etc/s6-overlay/s6-rc.d/svc-selkies/run
 test "$(grep -c '^exec s6-setuidgid abc \\$' "$run")" -eq 1
@@ -151,8 +157,8 @@ test "$(grep -c '^ *-nolisten "local" \\$' "$run")" -eq 1
 
 run=/etc/s6-overlay/s6-rc.d/svc-nginx/run
 test "$(grep -c '^exec /usr/sbin/nginx ' "$run")" -eq 1
-sed -i 's|^exec /usr/sbin/nginx |rm -f /run/mt5/health.sock\n&|' "$run"
-test "$(grep -c -x 'rm -f /run/mt5/health.sock' "$run")" -eq 1
+sed -i 's|^exec /usr/sbin/nginx |rm -f /run/mt/health.sock\n&|' "$run"
+test "$(grep -c -x 'rm -f /run/mt/health.sock' "$run")" -eq 1
 
 run=/etc/s6-overlay/s6-rc.d/svc-de/finish
 test "$(grep -c -F 'pstree -p "$PARENT_PID"' "$run")" -eq 1
@@ -165,6 +171,11 @@ test "$(grep -c -x 'https://www.linuxserver.io/donate/' "$run")" -eq 1
 sed -i '/^To support LSIO projects visit:$/,/^$/d' "$run"
 test "$(grep -c -F 'linuxserver.io/donate' "$run")" -eq 0
 test "$(grep -c -x 'GID/UID' "$run")" -eq 1
+
+run=/etc/s6-overlay/s6-rc.d/init-nginx/run
+test "$(grep -c -x -F 's6-setuidgid abc mkdir -p ${FILE_MANAGER_PATH}' "$run")" -eq 1
+sed -i 's|^s6-setuidgid abc mkdir -p \${FILE_MANAGER_PATH}$|s6-setuidgid abc mkdir -p "${FILE_MANAGER_PATH}"|' "$run"
+test "$(grep -c -x -F 's6-setuidgid abc mkdir -p "${FILE_MANAGER_PATH}"' "$run")" -eq 1
 EOF
 
 COPY root/ /
@@ -174,7 +185,7 @@ COPY root/ /
 RUN <<'EOF'
 #!/bin/bash
 set -euo pipefail
-pem=/opt/mt5/certs/microsoft-roots.pem
+pem=/opt/mt/certs/microsoft-roots.pem
 expected='847DF6A78497943F27FC72EB93F9A637320A02B561D0A91B09E87A7807ED7C61
 DF545BF919A2439C36983B54CDFC903DFA4F37D3996D8D84B4C31EEC6F3C163E'
 if grep -v -E '^(-----(BEGIN|END) CERTIFICATE-----|[A-Za-z0-9+/=]+)$' "$pem"; then
@@ -189,9 +200,9 @@ rm -rf "$tmp"
 test "$actual" = "$(sort <<< "$expected")"
 EOF
 
-# Healthy while MT5 runs and the desktop answers. The first start installs for
+# Healthy while MetaTrader runs and the desktop answers. The first start installs for
 # about 2 minutes, which the start period covers.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5m --retries=3 \
-  CMD ["/opt/mt5/healthcheck.sh"]
+  CMD ["/opt/mt/healthcheck.sh"]
 
 EXPOSE 3001

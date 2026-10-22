@@ -1,6 +1,6 @@
 #!/usr/bin/with-contenv bash
 # shellcheck shell=bash
-# init-mt5-access: checks the access settings, then writes nginx's site and
+# init-mt-access: checks the access settings, then writes nginx's site and
 # password file. It runs after the base's init-nginx and init-selkies-config,
 # and before any service starts. A refusal stops the container
 # (S6_BEHAVIOUR_IF_STAGE2_FAILS=2), so it never runs unprotected.
@@ -9,7 +9,7 @@ set -euo pipefail
 env_dir=/run/s6/container_environment
 template=/defaults/nginx-site.conf.tmpl
 site=/etc/nginx/sites-available/default
-conf_dir=/etc/nginx/mt5
+conf_dir=/etc/nginx/mt
 htpasswd=/etc/nginx/.htpasswd
 socket_dir=/run/selkies
 socket="$socket_dir/selkies.sock"
@@ -17,16 +17,16 @@ port="${CUSTOM_HTTPS_PORT:-3001}"
 user="${CUSTOM_USER:-trader}"
 subfolder="${SUBFOLDER:-/}"
 
-log() { printf '[mt5-access] %s\n' "$*"; }
-warn() { printf '[mt5-access] WARNING: %s\n' "$*"; }
+log() { printf '[mt-access] %s\n' "$*"; }
+warn() { printf '[mt-access] WARNING: %s\n' "$*"; }
 refuse() {
-  printf '[mt5-access] REFUSED: %s\n' "$1"
+  printf '[mt-access] REFUSED: %s\n' "$1"
   shift
   local line
   for line in "$@"; do
-    printf '[mt5-access]   %s\n' "$line"
+    printf '[mt-access]   %s\n' "$line"
   done
-  printf '[mt5-access] The container stops here instead of starting unprotected.\n'
+  printf '[mt-access] The container stops here instead of starting unprotected.\n'
   exit 1
 }
 
@@ -40,8 +40,8 @@ selkies_true() {
 }
 
 # 1. Nothing from the last run carries over.
-rm -rf /run/mt5
-install -d -m 0755 /run/mt5
+rm -rf /run/mt
+install -d -m 0755 /run/mt
 
 # 2. The settings.
 
@@ -225,7 +225,7 @@ if [[ -n "${DEV_MODE+x}" ]]; then
 fi
 wayland="${PIXELFLUX_WAYLAND:-}"
 if [[ "${wayland,,}" == true ]]; then
-  refuse "PIXELFLUX_WAYLAND=true. This image runs X11 only: in Wayland mode MT5 never starts."
+  refuse "PIXELFLUX_WAYLAND=true. This image runs X11 only: in Wayland mode MetaTrader never starts."
 fi
 selkies_mode="${SELKIES_MODE:-}"
 selkies_mode="${selkies_mode%%|*}"
@@ -294,21 +294,21 @@ else
   listen="$address:$port"
 fi
 if [[ "$host_network" == yes ]]; then
-  warn "host networking: only nginx listens, on $listen, but MT5 and EAs can reach whatever listens on the host's own loopback."
+  warn "host networking: only nginx listens, on $listen, but MetaTrader and EAs can reach whatever listens on the host's own loopback."
 fi
-if [[ "${MT5_AI_AGENTS:-}" == true && "$host_network" == yes ]]; then
-  warn "MT5_AI_AGENTS=true with host networking: MT5's AI-agent servers listen on the host's loopback, protected only by their API key, and two such containers would want the same ports."
+if [[ "${MT_AI_AGENTS:-}" == true && "$host_network" == yes ]]; then
+  warn "MT_AI_AGENTS=true with host networking: MetaTrader's AI-agent servers listen on the host's loopback, protected only by their API key."
 fi
 
 # 4. Selkies' socket folder. Only Selkies' user (abc) and nginx's (www-data,
-# through the group mt5sock) can reach the socket. The setgid bit gives the
+# through the group mtsock) can reach the socket. The setgid bit gives the
 # socket that group; abc sets it, because without CAP_FSETID the kernel
 # silently drops it when root does.
 mkdir -p "$socket_dir"
-chown abc:mt5sock "$socket_dir"
+chown abc:mtsock "$socket_dir"
 chmod 0750 "$socket_dir"
 s6-setuidgid abc chmod g+s "$socket_dir"
-if [[ "$(stat -c '%a %U %G' "$socket_dir")" != "2750 abc mt5sock" ]]; then
+if [[ "$(stat -c '%a %U %G' "$socket_dir")" != "2750 abc mtsock" ]]; then
   refuse "couldn't prepare $socket_dir for Selkies' socket." "$(stat -c '%A %U %G' "$socket_dir")"
 fi
 
@@ -323,13 +323,13 @@ chown root:www-data "$htpasswd.new"
 chmod 0640 "$htpasswd.new"
 mv -f "$htpasswd.new" "$htpasswd"
 
-# 6. The services that start next, the desktop and MT5 among them, never get
+# 6. The services that start next, the desktop and MetaTrader among them, never get
 # the plain-text password.
 rm -f "$env_dir/PASSWORD"
 unset password hash
 
 # 7. nginx's site: the desktop server, and the health-check server on
-# /run/mt5/health.sock, whose /healthz serves this file.
+# /run/mt/health.sock, whose /healthz serves this file.
 mkdir -p "$conf_dir"
 printf 'ok\n' > "$conf_dir/healthz"
 : > "$conf_dir/allow.conf"
@@ -347,11 +347,11 @@ else
   printf 'location / {\n  return 404;\n}\n' > "$conf_dir/outside-subfolder.conf"
 fi
 sed \
-  -e "s|MT5_LISTEN|$listen|g" \
-  -e "s|MT5_CERT|$cert|g" \
-  -e "s|MT5_KEY|$key|g" \
-  -e "s|MT5_SUBFOLDER|$subfolder|g" \
-  -e "s|MT5_SOCKET|$socket|g" \
+  -e "s|MT_LISTEN|$listen|g" \
+  -e "s|MT_CERT|$cert|g" \
+  -e "s|MT_KEY|$key|g" \
+  -e "s|MT_SUBFOLDER|$subfolder|g" \
+  -e "s|MT_SOCKET|$socket|g" \
   "$template" > "$site"
 
 # 8. Let nginx check it.
@@ -366,8 +366,8 @@ if (( ${#trusted[@]} > 0 )); then
 else
   allowed="anyone who can reach the port (TRUSTED_PROXIES isn't set)"
 fi
-if [[ "${MT5_AI_AGENTS:-}" == true ]]; then
-  agents="on (MT5_AI_AGENTS=true)"
+if [[ "${MT_AI_AGENTS:-}" == true ]]; then
+  agents="on (MT_AI_AGENTS=true)"
 else
   agents="off"
 fi
@@ -375,5 +375,5 @@ log "Listening on https://$listen$subfolder (HTTPS only). Host networking: $host
 log "Login: user '$user', password $password_source, kept as a SHA-512 hash that only nginx can read."
 log "Certificate: $cert_source. Clients allowed: $allowed."
 log "Stream: same origin${SELKIES_ALLOWED_ORIGINS:+ and ${SELKIES_ALLOWED_ORIGINS}}; WebSockets only. Clipboard: $clipboard. File transfers: $transfers."
-log "MT5's AI-agent servers: $agents."
-log "Health check: /healthz on /run/mt5/health.sock (plain HTTP, inside the container only)."
+log "MetaTrader's AI-agent servers: $agents."
+log "Health check: /healthz on /run/mt/health.sock (plain HTTP, inside the container only)."

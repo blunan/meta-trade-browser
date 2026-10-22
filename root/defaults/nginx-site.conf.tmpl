@@ -1,30 +1,30 @@
-# mt5-desktop's nginx site. init-mt5-access renders it at every start, over
-# the base's site, and fills in the MT5_* placeholders and the files in
-# /etc/nginx/mt5/. Two servers: the desktop, HTTPS only, and the container's
+# mt-browser's nginx site. init-mt-access renders it at every start, over
+# the base's site, and fills in the MT_* placeholders and the files in
+# /etc/nginx/mt/. Two servers: the desktop, HTTPS only, and the container's
 # health check, on a socket file. There is no plain-HTTP port.
 
 # Requests from an address in TRUSTED_PROXIES get their X-Forwarded-For logged.
 # Nothing else uses that header, so the access checks below always judge the
 # connecting address.
-geo $mt5_trusted_proxy {
+geo $mt_trusted_proxy {
   default 0;
-  include /etc/nginx/mt5/trusted-proxies.geo;
+  include /etc/nginx/mt/trusted-proxies.geo;
 }
-map $mt5_trusted_proxy $mt5_forwarded_for {
+map $mt_trusted_proxy $mt_forwarded_for {
   1       $http_x_forwarded_for;
   default "-";
 }
 
-log_format mt5 '$remote_addr forwarded=$mt5_forwarded_for user=$remote_user '
+log_format mt '$remote_addr forwarded=$mt_forwarded_for user=$remote_user '
                '[$time_local] "$request" $status $body_bytes_sent "$http_user_agent"';
 
 server {
-  listen MT5_LISTEN ssl;
-  ssl_certificate     MT5_CERT;
-  ssl_certificate_key MT5_KEY;
+  listen MT_LISTEN ssl;
+  ssl_certificate     MT_CERT;
+  ssl_certificate_key MT_KEY;
 
   # TRUSTED_PROXIES: when set, "allow" each entry, then "deny all".
-  include /etc/nginx/mt5/allow.conf;
+  include /etc/nginx/mt/allow.conf;
 
   auth_basic           "Login";
   auth_basic_user_file /etc/nginx/.htpasswd;
@@ -37,20 +37,20 @@ server {
   add_header X-Content-Type-Options "nosniff" always;
   add_header Referrer-Policy "no-referrer" always;
 
-  access_log /dev/stdout mt5;
+  access_log /dev/stdout mt;
   error_log  /dev/stderr error;
 
   # Anything outside SUBFOLDER, when SUBFOLDER isn't "/".
-  include /etc/nginx/mt5/outside-subfolder.conf;
+  include /etc/nginx/mt/outside-subfolder.conf;
 
-  location MT5_SUBFOLDER {
+  location MT_SUBFOLDER {
     alias /usr/share/selkies/web/;
     index index.html index.htm;
     try_files $uri $uri/ =404;
   }
 
   # Selkies, the stream included, on its socket file.
-  location MT5_SUBFOLDERapi {
+  location MT_SUBFOLDERapi {
     proxy_set_header        Upgrade $http_upgrade;
     proxy_set_header        Connection "upgrade";
     proxy_set_header        Host $http_host;
@@ -64,7 +64,7 @@ server {
     proxy_buffering         off;
     proxy_request_buffering off;
     client_max_body_size    0;
-    proxy_pass              http://unix:MT5_SOCKET:;
+    proxy_pass              http://unix:MT_SOCKET:;
   }
 }
 
@@ -73,18 +73,18 @@ server {
 # nothing outside the container can reach it. /healthz answers "ok" when
 # Selkies answers too, 500 when it doesn't.
 server {
-  listen unix:/run/mt5/health.sock;
+  listen unix:/run/mt/health.sock;
   access_log off;
 
   location = /healthz {
     auth_request /selkies;
     default_type text/plain;
-    alias /etc/nginx/mt5/healthz;
+    alias /etc/nginx/mt/healthz;
   }
   # Selkies serves its page under SUBFOLDER.
   location = /selkies {
     internal;
-    proxy_pass              http://unix:MT5_SOCKET:MT5_SUBFOLDER;
+    proxy_pass              http://unix:MT_SOCKET:MT_SUBFOLDER;
     proxy_pass_request_body off;
     proxy_set_header        Content-Length "";
     proxy_connect_timeout   5s;

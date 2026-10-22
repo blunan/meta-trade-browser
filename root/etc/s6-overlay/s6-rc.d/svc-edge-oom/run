@@ -2,9 +2,9 @@
 # shellcheck shell=bash
 # svc-edge-oom: when the container reaches its memory limit, the kernel stops
 # the process with the highest out-of-memory score, normally the largest one:
-# MT5. Once a second, this gives Edge's processes (WebView2, the HTML panes)
+# MetaTrader. Once a second, this gives Edge's processes (WebView2, the HTML panes)
 # the highest score, so the kernel stops one of them first. That pane goes
-# blank, and MT5 keeps running. Raising a score needs no privileges, so this
+# blank, and MetaTrader keeps running. Raising a score needs no privileges, so this
 # runs as the desktop user.
 set -euo pipefail
 
@@ -26,7 +26,7 @@ while true; do
   done
   kills="$(oom_kills)"
   if (( ${kills:-0} > ${reported:-0} )); then
-    echo "[mt5-edge-oom] The container reached its memory limit (mem_limit), and the kernel stopped a process to free memory ($kills so far). An HTML pane that went blank comes back when it's closed and reopened. If this happens often, raise mem_limit."
+    echo "[mt-edge-oom] The container reached its memory limit (mem_limit), and the kernel stopped a process to free memory ($kills so far). An HTML pane that went blank comes back when it's closed and reopened. If this happens often, raise mem_limit."
     reported="$kills"
   fi
   sleep 1

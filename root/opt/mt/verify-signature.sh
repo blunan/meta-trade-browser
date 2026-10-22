@@ -14,10 +14,10 @@
 # Microsoft replace their files without notice.
 set -euo pipefail
 
-roots=/opt/mt5/certs/microsoft-roots.pem
+roots=/opt/mt/certs/microsoft-roots.pem
 microsoft_crls=http://www.microsoft.com/pkiops/crl
 
-log() { printf '%s [mt5] %s\n' "$(date -u +%FT%TZ)" "$*"; }
+log() { printf '%s [mt] %s\n' "$(date -u +%FT%TZ)" "$*"; }
 refuse() {
   log "REFUSED: $(basename "$file") $*"
   exit 1

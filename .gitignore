@@ -9,7 +9,6 @@ compose.override.yaml
 secrets/
 data/
 ea/
-!.env.example
 
 # Local-only material
 ignore/
