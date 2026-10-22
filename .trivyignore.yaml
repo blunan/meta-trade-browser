@@ -1,0 +1,21 @@
+# Trivy's exceptions for the image (image.yml passes --ignorefile). Each one is
+# narrow, says why, and the ones that should go away expire.
+secrets:
+  # Debian's "snakeoil" key pair, generated once when linuxserver built the
+  # base, so every copy of the base has the same one. Nothing uses it, and the
+  # image deletes it, but the base's layer still holds it. Secret scanning stays
+  # on for every other file.
+  - id: private-key
+    paths:
+      - "/etc/ssl/private/ssl-cert-snakeoil.key"
+
+vulnerabilities:
+  # certifi 2026.7.22 in the base's Python for Selkies (/lsiopy) still trusts
+  # emSign CAs whose intermediate keys were compromised; 2026.10.19 fixes it.
+  # Only Selkies' AI-assistant code (PELORUS=false, and nginx answers 404) and
+  # dnspython's DNS-over-HTTPS (unused) load it. A base update should bring
+  # the fix; until then, this expires so the build fails again if it doesn't.
+  - id: GHSA-6q48-6c7w-9gw2
+    purls:
+      - "pkg:pypi/certifi@2026.7.22"
+    expired_at: 2026-11-30
