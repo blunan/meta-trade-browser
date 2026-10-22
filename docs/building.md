@@ -16,9 +16,19 @@ tests/access.sh
     docker compose -f compose.yaml -f tests/compose.dev.yaml up -d
     ```
 
+## In CI
+
+`.github/workflows/image.yml` runs the same checks on every pull request and on `main`:
+
+- `shellcheck` on every script;
+- the build, then `tests/access.sh --host`;
+- Trivy, which fails on any fixable HIGH or CRITICAL finding. Its exceptions, each with its reason, are in `.trivyignore.yaml`.
+
+On `main` it then pushes the image it tested, signs it, and tags it (see [Verify the image](verify.md)). Every Monday it rebuilds from scratch. Renovate proposes updates to the base image, the pinned actions and the tools as pull requests, and none merges by itself.
+
 ## This guide
 
-The guide is built with [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/) from `docs/` and `mkdocs.yml`. `docs/requirements.txt` pins every package with its hash; it's generated from `docs/requirements.in` with `pip-compile --generate-hashes`. To preview it:
+The guide is built with [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/) from `docs/` and `mkdocs.yml`. `docs/requirements.txt` pins every package with its hash; it's generated from `docs/requirements.in` with `pip-compile --generate-hashes`, by hand, with the command in that file (Renovate leaves both files alone). To preview it:
 
 ```sh
 python3 -m venv .venv
