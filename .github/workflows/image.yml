@@ -68,12 +68,16 @@ jobs:
             echo "This PR doesn't change the image, so its build, tests and scan are skipped." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Free disk space                  # the image takes about 10 GB while it builds
+      # The image takes about 10 GB while it builds. Runners now have far more
+      # free, and the cleanup took up to 2 minutes, so it runs only when they don't.
+      - name: Free disk space, if needed
         if: steps.changes.outputs.image == 'true'
         run: |
           df -h /
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift
-          df -h /
+          if (( $(df --output=avail -BG / | tail -n 1 | tr -dc 0-9) < 30 )); then
+            sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift
+            df -h /
+          fi
 
       - name: shellcheck
         if: steps.changes.outputs.image == 'true'
@@ -177,8 +181,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Free disk space
-        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift
+      - name: Free disk space, if needed         # as in the test job
+        run: |
+          if (( $(df --output=avail -BG / | tail -n 1 | tr -dc 0-9) < 30 )); then
+            sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift
+          fi
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 

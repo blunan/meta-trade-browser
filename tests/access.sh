@@ -128,24 +128,33 @@ ready() {
 }
 
 # refused <description> <text in the REFUSED line> [docker run options...]:
-# the container must stop, and its log must name the reason.
+# the container must stop, and its log must name the reason. It starts at
+# once, and refusals_checked checks it: the refusals all start together,
+# rather than one after another.
+refusals=()
 refused() {
-  local description="$1" text="$2" name="$run-refused" state="" reason _
-  shift 2
-  docker rm -f "$name" > /dev/null 2>&1 || true
-  docker run -d --name "$name" --network "$net" "${hardening[@]}" "$@" "$image" > /dev/null
-  for _ in $(seq 1 60); do
+  local name="$run-refused-$((${#refusals[@]} / 3))"
+  docker run -d --name "$name" --network "$net" "${hardening[@]}" "${@:3}" "$image" > /dev/null
+  refusals+=("$name" "$1" "$2")
+}
+
+# refusals_checked: checks the containers refused started, in order. Each gets
+# up to 60 s to stop.
+refusals_checked() {
+  local i name description text state reason
+  for ((i = 0; i < ${#refusals[@]}; i += 3)); do
+    name="${refusals[i]}" description="${refusals[i + 1]}" text="${refusals[i + 2]}"
+    timeout 60 docker wait "$name" > /dev/null 2>&1 || true
     state="$(docker inspect -f '{{.State.Status}}' "$name")"
-    [[ "$state" == exited ]] && break
-    sleep 1
+    reason="$(docker logs "$name" 2>&1 | grep -F '[mt-access] REFUSED:' || true)"
+    if [[ "$state" == exited ]] && grep -qF -- "$text" <<< "$reason"; then
+      pass "$description"
+    else
+      fail "$description: state '$state', reason '${reason:-none}'"
+    fi
+    docker rm -f "$name" > /dev/null 2>&1 || true
   done
-  reason="$(docker logs "$name" 2>&1 | grep -F '[mt-access] REFUSED:' || true)"
-  if [[ "$state" == exited ]] && grep -qF -- "$text" <<< "$reason"; then
-    pass "$description"
-  else
-    fail "$description: state '$state', reason '${reason:-none}'"
-  fi
-  docker rm -f "$name" > /dev/null 2>&1 || true
+  refusals=()
 }
 
 # code [--from <probe>] <curl options and URL...>: the HTTP status, 000 when
@@ -305,6 +314,7 @@ refused "T10: SUBFOLDER without slashes" "SUBFOLDER must start and end with '/'"
 refused "T10: SELKIES_FILE_TRANSFERS=off" "SELKIES_FILE_TRANSFERS must be" "${with_password[@]}" -e SELKIES_FILE_TRANSFERS=off
 refused "T10: SELKIES_FILE_TRANSFERS=none|locked" "SELKIES_FILE_TRANSFERS must be" "${with_password[@]}" -e 'SELKIES_FILE_TRANSFERS=none|locked'
 refused "T10: SELKIES_CLIPBOARD_ENABLED=off" "SELKIES_CLIPBOARD_ENABLED must be" "${with_password[@]}" -e SELKIES_CLIPBOARD_ENABLED=off
+refusals_checked
 
 echo "Defaults (T2, T3, T5-T8, T13, T14, T16, T17, T19-T21)"
 start "$net" main "${with_password[@]}"
