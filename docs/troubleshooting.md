@@ -8,7 +8,7 @@
     - nginx's log of logins and requests;
     - Wine's errors.
 - **MetaTrader's start log** stays in `/config/log/mt/run-terminal.log` (`data/log/mt/` on the host) across restarts.
-- **A failed install step** shows a small window on the desktop, and the log says why. It's tried again every 60 s: a lost download, or a signature check that failed because a revocation list couldn't be fetched, usually passes on a later try. A file whose signature is wrong is never run.
+- **A failed install step** shows a window on the desktop with the reason, counting down to the next try 60 s later, and the log has the details. A lost download, or a signature check that failed because a revocation list couldn't be fetched, usually passes on a later try. A file whose signature is wrong is never run.
 - **The container keeps restarting:** the startup check refused a setting. The log's `[mt-access] REFUSED:` line says which (see [Refused](settings.md#refused)).
 - **Behind a proxy, the page loads but the desktop never appears:** the proxy probably replaces `Host`, and the container refuses the stream (see [Behind a reverse proxy](reverse-proxy.md#what-every-proxy-needs)).
 - **More from Wine:** `WINEDEBUG=fixme-all`, or empty (see [Wine's own settings](settings.md#wines-own)).
