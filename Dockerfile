@@ -159,6 +159,11 @@ EOF
 
 COPY root/ /
 
+# The window run-terminal.sh shows until MetaTrader starts (notice.py) uses the
+# base's GTK 3 from the system's Python. A base update that drops it fails here.
+RUN /usr/bin/python3 -I -c 'import gi; gi.require_version("Gtk", "3.0"); from gi.repository import Gtk' && \
+    /usr/bin/python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' /opt/mt/notice.py
+
 # The WebView2 installer is verified against exactly these two Microsoft roots:
 # Root Certificate Authority 2011 (code signing) and 2010 (timestamps).
 RUN <<'EOF'

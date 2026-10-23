@@ -119,7 +119,7 @@ jobs:
           jq -r '.[]' <<< "$layers"
           echo "layers=$layers" >> "$GITHUB_OUTPUT"
 
-      - name: Access tests (T1–T20)
+      - name: Access tests (T1–T21)
         if: steps.changes.outputs.image == 'true'
         run: tests/access.sh --host mt-browser:ci
 

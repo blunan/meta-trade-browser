@@ -15,6 +15,9 @@
 #
 # Every start then sets Edge's Windows version and MetaTrader's AI-agent servers,
 # links the /mql5 mount, and runs MetaTrader in the foreground.
+#
+# While it installs, or a step fails, a window on the desktop (notice.py) shows
+# the step it's on, or why it failed and when it tries again.
 set -euo pipefail
 
 export WINEPREFIX="${WINEPREFIX:-/config/.wine}"
@@ -58,25 +61,26 @@ if pid="$(pgrep -o -f "$mt_process")"; then
 fi
 
 notice_pid=
+notice_fd=
 tmp=
-# notice <text>: a small window on the desktop while MetaTrader can't start yet.
-# Openbox maximizes every window it manages, so this one asks not to be
-# managed (overrideRedirect), and stays small and centred.
+# notice <field>...: updates the window on the desktop while MetaTrader can't
+# start yet, opening it the first time. notice.py lists the lines it takes; the
+# fields go out tab-separated. Its errors go to this script's log.
 notice() {
-  close_notice
-  xmessage -center -buttons OK \
-    -xrm '*overrideRedirect: True' \
-    -xrm '*font: -*-helvetica-bold-r-normal--17-*-*-*-*-*-iso8859-1' \
-    -xrm '*message.scrollVertical: never' -xrm '*message.scrollHorizontal: never' \
-    -xrm '*message.borderWidth: 0' \
-    -xrm '*message.leftMargin: 16' -xrm '*message.rightMargin: 16' \
-    -xrm '*message.topMargin: 12' -xrm '*message.bottomMargin: 8' \
-    "$1" > /dev/null 2>&1 &
-  notice_pid=$!
+  if [[ -z "$notice_pid" ]]; then
+    exec {notice_fd}> >(exec /usr/bin/python3 -I /opt/mt/notice.py > /dev/null)
+    notice_pid=$!
+  fi
+  # In a subshell, so a window that has gone can't end this script with SIGPIPE.
+  (
+    IFS=$'\t'
+    printf '%s\n' "$*" >&"$notice_fd"
+  ) 2> /dev/null || true
 }
 close_notice() {
   if [[ -n "$notice_pid" ]]; then
     kill "$notice_pid" 2> /dev/null || true
+    exec {notice_fd}>&-
     notice_pid=
   fi
 }
@@ -92,9 +96,7 @@ trap cleanup EXIT
 # watchdog from retrying in a tight loop.
 fail() {
   log "ERROR: $1. Retrying in $retry_delay s."
-  notice "MetaTrader can't start yet: $1.
-
-Retrying in $retry_delay seconds. The container's log (docker logs) has the details."
+  notice retry "$retry_delay" "${1^}."
   sleep "$retry_delay"
   exit 1
 }
@@ -140,6 +142,7 @@ webview2_version() {
 
 prepare_prefix() {
   local started=$SECONDS
+  notice install "Step 1 of 3: setting up Wine"
   if [[ -f "$WINEPREFIX/.mt5-installed" ]]; then
     # From an earlier version of this image, which marked only the MetaTrader install.
     log "step 1 of 3: the Wine prefix already holds MetaTrader; keeping it as it is"
@@ -166,10 +169,13 @@ prepare_prefix() {
 install_webview2() {
   local started=$SECONDS rc=0 setup="$tmp/MicrosoftEdgeWebview2Setup.exe" _
   log "step 2 of 3: Microsoft Edge WebView2, for MetaTrader's and MetaEditor's HTML panes"
+  notice install "Step 2 of 3: downloading Microsoft Edge WebView2"
   download "$webview2_url" "$setup" || fail "the WebView2 download failed"
+  notice install "Step 2 of 3: checking Microsoft's signature"
   /opt/mt/verify-signature.sh microsoft "$setup" ||
     fail "the WebView2 installer didn't pass its signature check, so it wasn't run"
   log "installing WebView2"
+  notice install "Step 2 of 3: installing Microsoft Edge WebView2"
   timeout 900 wine "$setup" /silent /install || rc=$?
   log "the WebView2 installer exited with code $rc"
   # Edge Update installs the runtime, and then keeps running. So from here on,
@@ -186,10 +192,13 @@ install_webview2() {
 install_mt() {
   local started=$SECONDS rc=0 setup="$tmp/mt5setup.exe" file
   log "step 3 of 3: MetaTrader"
+  notice install "Step 3 of 3: downloading MetaTrader"
   download "$mt_url" "$setup" || fail "the MetaTrader download failed"
+  notice install "Step 3 of 3: checking MetaQuotes' signature"
   /opt/mt/verify-signature.sh metaquotes "$setup" ||
-    fail "mt5setup.exe didn't pass its signature check, so it wasn't run"
+    fail "the MetaTrader installer didn't pass its signature check, so it wasn't run"
   log "installing MetaTrader"
+  notice install "Step 3 of 3: installing MetaTrader"
   timeout 900 wine "$setup" /auto || rc=$?
   # It exits with 1 even when it succeeds, so its files decide.
   log "the MetaTrader installer exited with code $rc"
@@ -277,7 +286,6 @@ link_mounts() {
 if [[ ! -f "$WINEPREFIX/.prefix-ready" || ! -f "$WINEPREFIX/.webview2-installed" ||
   ! -f "$WINEPREFIX/.mt5-installed" ]]; then
   started=$SECONDS
-  notice "Installing MetaTrader. This takes a couple of minutes."
   tmp="$(mktemp -d)"
   # Wine reports dozens of harmless errors while it builds the prefix and the
   # installers run. With the image's WINEDEBUG they stay out of the log; a
@@ -298,6 +306,16 @@ fi
 edge_as_win11 || log "WARNING: Edge's Windows version couldn't be set, so the HTML panes may stay blank"
 set_ai_agents || fail "MetaTrader's AI-agent servers couldn't be set in Config/assistant.ini"
 link_mounts
-close_notice
+# The window stays until MetaTrader's own appears, at most 60 s, so the desktop
+# isn't empty in between. exec ends this script, so a background job closes it.
+if [[ -n "$notice_pid" ]]; then
+  notice start
+  exec {notice_fd}>&-
+  (
+    timeout 60 xdotool search --sync --onlyvisible --classname '^terminal64\.exe$' > /dev/null 2>&1 || true
+    kill "$notice_pid" 2> /dev/null || true
+  ) &
+  notice_pid=
+fi
 log "starting MetaTrader"
 exec wine "$mt_dir/terminal64.exe" /portable

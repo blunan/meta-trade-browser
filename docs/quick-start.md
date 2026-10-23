@@ -96,7 +96,7 @@ On your own computer, open an SSH tunnel to the server and leave it open:
 ssh -N -L 3001:127.0.0.1:3001 you@your-server
 ```
 
-Then browse to `https://localhost:3001`. The browser warns about the certificate, because the container made its own; accept it. Sign in as `trader` with the password. While MetaTrader is still installing, the desktop shows a small *Installing MetaTrader* window.
+Then browse to `https://localhost:3001`. The browser warns about the certificate, because the container made its own; accept it. Sign in as `trader` with the password. While MetaTrader is still installing, the desktop shows an *Installing MetaTrader* window with the step it's on.
 
 To stop the warning for good, trust that certificate on your computer: copy `data/ssl/cert.pem` from the server, and add it to your trusted certificates (on macOS, open it in Keychain Access and set it to *Always Trust*). It's issued to `localhost` and `127.0.0.1` only, and it can't vouch for any other site. The container renews it about every two years, when it needs trusting again.
 

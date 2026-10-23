@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Access-layer tests for the mt-browser image.
+# Access-layer tests for the mt-browser image, and T21: the window the desktop
+# shows while MetaTrader can't start.
 #
 # Each configuration runs the image on an internal Docker network, which has
 # no internet: MetaTrader's first-start downloads fail at once, and the access layer
@@ -229,6 +230,43 @@ trusted() {
     --cacert /tmp/main.pem "${@:2}" "$1" || true
 }
 
+# notice_window <name>: the window the desktop shows while MetaTrader can't
+# start (notice.py), as "<how many> framed|unframed small|full
+# centred|off centre by <x>,<y>". Small means its frame, title bar included, is
+# smaller than the screen: openbox marks every window maximized, as it does
+# MetaTrader's dialogs, but a fixed size keeps them small. Centred means the
+# frame, to 2 px. Asked again for up to 10 s until it's "1 framed small
+# centred": after a failed step, the window closes and opens again every 60 s.
+# Its position comes from xwininfo: xdotool's counts the frame's offset twice.
+notice_window() {
+  local window _
+  for _ in $(seq 1 10); do
+    window="$(docker exec "$run-$1" sh -c '
+      set -- $(xdotool search --onlyvisible --classname "^mt-notice\$")
+      [ $# -gt 0 ] || { echo 0; exit; }
+      count=$#
+      id=$1
+      extents="$(xprop -id "$id" _NET_FRAME_EXTENTS | sed -n "s/.* = //p" | tr -d ,)"
+      framed=framed
+      [ -n "$extents" ] || { framed=unframed; extents="0 0 0 0"; }
+      set -- $(xwininfo -id "$id" | awk "
+        /Absolute upper-left X/ { x = \$NF } /Absolute upper-left Y/ { y = \$NF }
+        /^ *Width:/ { w = \$NF } /^ *Height:/ { h = \$NF } END { print x, y, w, h }")
+      x=$1 y=$2 w=$3 h=$4
+      set -- $extents $(xdotool getdisplaygeometry)
+      size=small
+      if [ $((w + $1 + $2)) -ge "$5" ] || [ $((h + $3 + $4)) -ge "$6" ]; then size=full; fi
+      dx=$(((2 * x + w - $1 + $2 - $5) / 2))
+      dy=$(((2 * y + h - $3 + $4 - $6) / 2))
+      place=centred
+      if [ "${dx#-}" -gt 2 ] || [ "${dy#-}" -gt 2 ]; then place="off centre by $dx,$dy"; fi
+      echo "$count $framed $size $place"' 2> /dev/null || true)"
+    [[ "$window" == "1 framed small centred" ]] && break
+    sleep 1
+  done
+  printf '%s' "$window"
+}
+
 echo "Image: $image"
 docker network create --internal "$net" > /dev/null
 for probe in probe probe2; do
@@ -268,7 +306,7 @@ refused "T10: SELKIES_FILE_TRANSFERS=off" "SELKIES_FILE_TRANSFERS must be" "${wi
 refused "T10: SELKIES_FILE_TRANSFERS=none|locked" "SELKIES_FILE_TRANSFERS must be" "${with_password[@]}" -e 'SELKIES_FILE_TRANSFERS=none|locked'
 refused "T10: SELKIES_CLIPBOARD_ENABLED=off" "SELKIES_CLIPBOARD_ENABLED must be" "${with_password[@]}" -e SELKIES_CLIPBOARD_ENABLED=off
 
-echo "Defaults (T2, T3, T5-T8, T13, T14, T16, T17, T19, T20)"
+echo "Defaults (T2, T3, T5-T8, T13, T14, T16, T17, T19-T21)"
 start "$net" main "${with_password[@]}"
 if ready main; then
   t="$run-main:3001"
@@ -369,6 +407,22 @@ if ready main; then
   else
     pass "Q5: health checks aren't logged"
   fi
+  # Offline, the first start fails at step 2, and the window says why.
+  for _ in $(seq 1 120); do
+    logged main "Retrying in 60 s" && break
+    sleep 1
+  done
+  check "T21: the startup window: one, framed like MetaTrader's windows, not filling the screen, centred" \
+    "1 framed small centred" "$(notice_window main)"
+  # The size changes the way the desktop sets it, as when a browser connects.
+  # The restart below brings the old size back.
+  docker exec "$run-main" sh -c '
+    mode="$(cvt 1600 900 | sed -n "s/^Modeline //p" | tr -d "\"")"
+    name="${mode%% *}"
+    xrandr --newmode $mode && xrandr --addmode screen "$name" && xrandr --output screen --mode "$name"' \
+    > /dev/null 2>&1 || true
+  check "T21: the screen changes size" "1600 900" "$(docker exec "$run-main" xdotool getdisplaygeometry)"
+  check "T21: the window is centred again" "1 framed small centred" "$(notice_window main)"
   # The certificate the base makes, as its init-nginx makes it.
   docker exec -u abc "$run-main" openssl req -new -x509 -days 3650 -nodes \
     -out /config/ssl/cert.pem -keyout /config/ssl/cert.key \
