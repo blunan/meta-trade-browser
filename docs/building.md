@@ -24,7 +24,7 @@ tests/access.sh
 - the build, then `tests/access.sh --host`;
 - Trivy, which fails on any fixable HIGH or CRITICAL finding. Its exceptions, each with its reason, are in `.trivyignore.yaml`.
 
-On `main` it then pushes the image it tested, signs it, and tags it (see [Verify the image](verify.md)). Every Monday it rebuilds from scratch. Renovate proposes updates to the base image, the pinned actions and the tools as pull requests, and none merges by itself.
+On `main` it then pushes the image it tested, signs it, and tags it (see [Verify the image](verify.md)). It runs on no schedule and can't be run by hand: the image changes only when a pull request is merged. Renovate proposes updates to the base image, the pinned actions and the tools as pull requests, and none merges by itself.
 
 ## This guide
 

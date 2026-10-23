@@ -15,9 +15,8 @@ on:
       - .trivyignore.yaml
       - .github/workflows/image.yml
   pull_request:
-  schedule:
-    - cron: "0 6 * * 1"                        # Mondays: Debian's and the base's updates
-  workflow_dispatch:
+  # No schedule and no manual runs: the image changes only through a merged
+  # PR, such as Renovate's base-image updates, which also bring Debian's fixes.
 
 permissions: {}
 
@@ -95,7 +94,6 @@ jobs:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         if: steps.changes.outputs.image == 'true'
 
-      # The weekly build starts from scratch, so apt-get upgrade really runs.
       # The publish job rebuilds from this build's cache.
       - name: Build
         if: steps.changes.outputs.image == 'true'
@@ -106,7 +104,6 @@ jobs:
           tags: mt-browser:ci
           provenance: false
           sbom: false
-          no-cache: ${{ github.event_name == 'schedule' }}
           cache-from: type=gha
           cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max' || '' }}
           build-args: |
@@ -169,7 +166,7 @@ jobs:
   publish:
     name: Publish
     needs: test
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
