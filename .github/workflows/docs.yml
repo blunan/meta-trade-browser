@@ -2,6 +2,7 @@
 # https://mt-browser.blunan.com/ (the domain is set in the repository's Pages
 # settings, not in a CNAME file). Pull requests only build and check it.
 # "Docs build" is a required check, so it runs on every PR, in about 20 s.
+# There are no manual runs: the guide changes only through a merged PR.
 name: docs
 
 on:
@@ -14,7 +15,6 @@ on:
       - README.md
       - .github/workflows/docs.yml
   pull_request:
-  workflow_dispatch:
 
 permissions: {}
 
@@ -48,13 +48,13 @@ jobs:
       - name: Build the guide
         run: mkdocs build --strict
 
-      - if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site
 
   deploy:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-24.04
     permissions:
