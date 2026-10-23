@@ -12,7 +12,7 @@ ssh -N -L 3001:127.0.0.1:3001 you@your-server
 
 ## A VPN
 
-- **Publish on the VPN's address:** in `compose.yaml`'s `ports`, or `docker run`'s `-p`, replace `127.0.0.1` with the server's VPN address, such as its Tailscale IP, and recreate the container. Only devices on the VPN can then connect, at `https://<that address>:3001`. The address has to exist when the container starts: if the VPN starts after Docker at boot, run `docker compose up -d` once it's up.
+- **Publish on the VPN's address:** in `compose.yaml`'s `ports`, or `docker run`'s `-p`, replace `127.0.0.1` with the server's VPN address, such as its Tailscale IP, and recreate the container. Only devices on the VPN can then connect, at `https://<that address>:3001`. The address has to exist when the container starts: if the VPN starts after Docker at boot, run `docker compose up -d` once it's up. For a certificate the browser trusts at that address, see [Your own certificate](folders.md#your-own-certificate).
 - **Tailscale Serve:** keep `127.0.0.1`, and let Tailscale serve the desktop on your tailnet with its own certificate:
 
     ```sh

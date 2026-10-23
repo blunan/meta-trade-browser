@@ -14,12 +14,11 @@ ARG STRIP_WINE_DEBUG=true
 # stays off (the base sets it; init-mt-access makes sure). The login name is
 # trader, and the desktop's user is 1000:1000. The file panel shows when file
 # transfers are on (init-mt-access sets it, unless you do), and uploads land
-# in MetaTrader's own Experts folder.
+# in the EA folder's Experts, or MetaTrader's own (init-mt-access picks).
 ENV TITLE=MetaTrader \
     CUSTOM_USER=trader \
     PUID=1000 \
     PGID=1000 \
-    FILE_MANAGER_PATH="/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts" \
     PIXELFLUX_WAYLAND=false \
     WINEPREFIX=/config/.wine \
     WINEDEBUG=fixme-all,err-toolbar \
@@ -116,8 +115,8 @@ EOF
 #   left out now.
 # - The startup log keeps the image's branding but not linuxserver's request
 #   for donations, which would read as this image's.
-# - The upload folder, FILE_MANAGER_PATH, has spaces in its path, so nginx's
-#   setup script quotes it when it creates the folder.
+# - nginx's setup script no longer creates the upload folder,
+#   FILE_MANAGER_PATH: init-mt-access picks it, and creates it.
 RUN <<'EOF'
 #!/bin/bash
 set -euo pipefail
@@ -154,8 +153,8 @@ test "$(grep -c -x 'GID/UID' "$run")" -eq 1
 
 run=/etc/s6-overlay/s6-rc.d/init-nginx/run
 test "$(grep -c -x -F 's6-setuidgid abc mkdir -p ${FILE_MANAGER_PATH}' "$run")" -eq 1
-sed -i 's|^s6-setuidgid abc mkdir -p \${FILE_MANAGER_PATH}$|s6-setuidgid abc mkdir -p "${FILE_MANAGER_PATH}"|' "$run"
-test "$(grep -c -x -F 's6-setuidgid abc mkdir -p "${FILE_MANAGER_PATH}"' "$run")" -eq 1
+sed -i '/^s6-setuidgid abc mkdir -p \${FILE_MANAGER_PATH}$/d' "$run"
+test "$(grep -c -F 'mkdir -p ${FILE_MANAGER_PATH}' "$run")" -eq 0
 EOF
 
 COPY root/ /
