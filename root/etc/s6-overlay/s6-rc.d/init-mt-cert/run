@@ -1,8 +1,8 @@
 #!/usr/bin/with-contenv bash
 # shellcheck shell=bash
 # init-mt-cert: the desktop's own certificate, /config/ssl/cert.pem and
-# cert.key, served unless you give one in TLS_CERT_FILE. It runs before the
-# base's init-nginx, which then finds it and makes none of its own.
+# cert.key, served unless you mount your own there. It runs before the base's
+# init-nginx, which then finds it and makes none of its own.
 #
 # It's issued to localhost, 127.0.0.1 and ::1, so it can be trusted on your
 # computer for the SSH tunnel's address, and it can't sign other certificates,
@@ -11,7 +11,7 @@
 #
 # A certificate of your own in /config/ssl is never touched. The one the base
 # makes (issued to "*" by "Linuxserver.io", and able to sign others) is
-# replaced.
+# replaced. So is an empty cert.pem: removing a mount over it leaves one behind.
 set -euo pipefail
 
 dir=/config/ssl
@@ -23,8 +23,16 @@ renew_within=$((30 * 24 * 3600))
 
 log() { printf '[mt-cert] %s\n' "$*"; }
 
+# A mount whose file doesn't exist on the server becomes a folder.
+for file in "$cert" "$key"; do
+  if [[ -e "$file" && ! -f "$file" ]]; then
+    log "ERROR: $file isn't a file. If you mount your own certificate there, check that the file the mount names exists on the server."
+    exit 1
+  fi
+done
+
 action=
-if [[ ! -f "$cert" ]]; then
+if [[ ! -s "$cert" ]]; then
   action=made
 else
   subject="$(openssl x509 -in "$cert" -noout -subject 2> /dev/null || true)"

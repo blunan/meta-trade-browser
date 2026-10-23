@@ -132,6 +132,23 @@ if [[ "${SELKIES_UI_SIDEBAR_SHOW_FILES:-}" == auto ]]; then
     printf 'true' > "$env_dir/SELKIES_UI_SIDEBAR_SHOW_FILES"
   fi
 fi
+# Where uploads land, and the folder downloads come from: the EA folder's
+# Experts when /mql5 is mounted and the desktop's user can write there,
+# otherwise MetaTrader's own.
+files="$WINEPREFIX/drive_c/Program Files/MetaTrader 5/MQL5/Experts"
+if [[ -d /mql5 ]] && s6-setuidgid abc mkdir -p /mql5/Experts 2> /dev/null &&
+  s6-setuidgid abc test -w /mql5/Experts; then
+  files=/mql5/Experts
+fi
+# Deprecated: remove on or after 2026-12-22.
+if [[ -n "${FILE_MANAGER_PATH:-}" ]]; then
+  warn "FILE_MANAGER_PATH is deprecated, and images from 2026-12-22 on ignore it. Uploads then land in the EA folder's Experts when /mql5 is mounted and writable, otherwise in MetaTrader's own: here, $files."
+  files="$FILE_MANAGER_PATH"
+fi
+if ! s6-setuidgid abc mkdir -p "$files" 2> /dev/null; then
+  warn "the desktop's user can't create $files, so uploads there will fail."
+fi
+printf '%s' "$files" > "$env_dir/FILE_MANAGER_PATH"
 # The base copies SELKIES_CLIPBOARD_ENABLED to SELKIES_ENABLE_CLIPBOARD, the
 # one Selkies reads, unless that's set. Selkies ignores case, spaces and a
 # "|..." suffix, and reads empty as its default, true.
@@ -178,10 +195,13 @@ if [[ -n "${CUSTOM_PORT:-}" ]]; then
   warn "CUSTOM_PORT is set, but there is no plain HTTP. Only HTTPS listens, on CUSTOM_HTTPS_PORT ($port)."
 fi
 
-## The certificate.
+## The certificate: yours or the container's own, in /config/ssl. init-mt-cert
+## has made the container's own if there was none.
 cert=/config/ssl/cert.pem
 key=/config/ssl/cert.key
+# Deprecated: remove on or after 2026-12-22.
 if [[ -n "${TLS_CERT_FILE:-}" || -n "${TLS_KEY_FILE:-}" ]]; then
+  warn "TLS_CERT_FILE and TLS_KEY_FILE are deprecated, and images from 2026-12-22 on ignore them. Mount your certificate and key at $cert and $key instead."
   if [[ -z "${TLS_CERT_FILE:-}" || -z "${TLS_KEY_FILE:-}" ]]; then
     refuse "only one of TLS_CERT_FILE and TLS_KEY_FILE is set. Set both, or neither."
   fi
@@ -195,11 +215,27 @@ if [[ -n "${TLS_CERT_FILE:-}" || -n "${TLS_KEY_FILE:-}" ]]; then
   done
   cert="$TLS_CERT_FILE"
   key="$TLS_KEY_FILE"
-  cert_source="TLS_CERT_FILE"
-elif [[ -f /config/ssl/cert.pem && -f /config/ssl/cert.key ]]; then
-  cert_source="/config/ssl"
-else
-  refuse "no certificate in /config/ssl, and none given in TLS_CERT_FILE."
+  cert_source="TLS_CERT_FILE (deprecated)"
+elif [[ ! -f "$cert" || ! -f "$key" ]]; then
+  refuse "no certificate in /config/ssl: cert.pem and cert.key must both be there." \
+    "To serve your own, mount both files, or neither."
+fi
+# nginx would fail later, with a less clear message.
+if ! cert_public="$(openssl x509 -in "$cert" -noout -pubkey 2> /dev/null)"; then
+  refuse "$cert isn't a certificate nginx can read. It must be PEM."
+fi
+if ! key_public="$(openssl pkey -in "$key" -pubout -passin pass: 2> /dev/null)"; then
+  refuse "$key isn't a private key nginx can read. It must be PEM, without a passphrase."
+fi
+if [[ "$cert_public" != "$key_public" ]]; then
+  refuse "the certificate and the key don't belong together." "$cert" "$key"
+fi
+if [[ -z "${cert_source:-}" ]]; then
+  if [[ "$(openssl x509 -in "$cert" -noout -subject -issuer)" == $'subject=O=mt-browser, CN=localhost\nissuer=O=mt-browser, CN=localhost' ]]; then
+    cert_source="the container's own, in /config/ssl"
+  else
+    cert_source="yours, in /config/ssl"
+  fi
 fi
 
 ## Settings with no use here that would remove a protection.
@@ -371,9 +407,13 @@ if [[ "${MT_AI_AGENTS:-}" == true ]]; then
 else
   agents="off"
 fi
+transfers_shown="$transfers"
+if [[ "$transfers" != none ]]; then
+  transfers_shown="$transfers, in $files"
+fi
 log "Listening on https://$listen$subfolder (HTTPS only). Host networking: $host_network."
 log "Login: user '$user', password $password_source, kept as a SHA-512 hash that only nginx can read."
 log "Certificate: $cert_source. Clients allowed: $allowed."
-log "Stream: same origin${SELKIES_ALLOWED_ORIGINS:+ and ${SELKIES_ALLOWED_ORIGINS}}; WebSockets only. Clipboard: $clipboard. File transfers: $transfers."
+log "Stream: same origin${SELKIES_ALLOWED_ORIGINS:+ and ${SELKIES_ALLOWED_ORIGINS}}; WebSockets only. Clipboard: $clipboard. File transfers: $transfers_shown."
 log "MetaTrader's AI-agent servers: $agents."
 log "Health check: /healthz on /run/mt/health.sock (plain HTTP, inside the container only)."

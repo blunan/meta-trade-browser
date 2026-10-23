@@ -77,6 +77,11 @@ printf '%s' 'only8chr' > "$tmp/short"
 printf '%s' 'securepassword' > "$tmp/placeholder"
 : > "$tmp/docker.sock"
 with_password=(-v "$tmp/password:/run/secrets/password:ro" -e FILE__PASSWORD=/run/secrets/password)
+# A certificate of your own, and a key that doesn't belong to it.
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=mt-access-test \
+  -keyout "$tmp/tls.key" -out "$tmp/tls.crt" 2> /dev/null
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out "$tmp/other.key" 2> /dev/null
+own_cert=(-v "$tmp/tls.crt:/config/ssl/cert.pem:ro" -v "$tmp/tls.key:/config/ssl/cert.key:ro")
 
 # start <network> <name> [docker run options...]
 start() {
@@ -252,7 +257,11 @@ refused "T10: another SELKIES_UNIX_SOCKET" "SELKIES_UNIX_SOCKET must stay" "${wi
 refused "T10: SELKIES_ENABLE_BASIC_AUTH=true" "SELKIES_ENABLE_BASIC_AUTH=true" "${with_password[@]}" -e SELKIES_ENABLE_BASIC_AUTH=true
 refused "T10: the Docker socket mounted" "Docker socket is mounted" "${with_password[@]}" -v "$tmp/docker.sock:/var/run/docker.sock:ro"
 refused "T10: SYS_ADMIN (privileged)" "CAP_SYS_ADMIN" "${with_password[@]}" --cap-add SYS_ADMIN
-refused "T10: only TLS_CERT_FILE" "only one of TLS_CERT_FILE" "${with_password[@]}" -e TLS_CERT_FILE=/config/ssl/cert.pem
+refused "T10: only TLS_CERT_FILE (deprecated)" "only one of TLS_CERT_FILE" "${with_password[@]}" -e TLS_CERT_FILE=/config/ssl/cert.pem
+refused "T10: a certificate and a key that don't belong together" "don't belong together" "${with_password[@]}" \
+  -v "$tmp/tls.crt:/config/ssl/cert.pem:ro" -v "$tmp/other.key:/config/ssl/cert.key:ro"
+refused "T10: a certificate without its key" "cert.pem and cert.key must both be there" "${with_password[@]}" \
+  -v "$tmp/tls.crt:/config/ssl/cert.pem:ro"
 refused "T10: LISTEN_ADDRESS that isn't an address" "LISTEN_ADDRESS must be one IP address" "${with_password[@]}" -e LISTEN_ADDRESS=all
 refused "T10: SUBFOLDER without slashes" "SUBFOLDER must start and end with '/'" "${with_password[@]}" -e SUBFOLDER=mt
 refused "T10: SELKIES_FILE_TRANSFERS=off" "SELKIES_FILE_TRANSFERS must be" "${with_password[@]}" -e SELKIES_FILE_TRANSFERS=off
@@ -421,44 +430,103 @@ if ready files; then
 fi
 docker rm -f "$run-files" > /dev/null
 
-echo "CUSTOM_PORT and PASSWORD (T3, warnings)"
-start "$net" plain -e CUSTOM_PORT=3000 -e "PASSWORD=$password"
+echo "Uploads with the EA folder mounted (T18)"
+# Open to all, because the user running this script may not be 1000.
+mkdir -m 0777 "$tmp/mql5"
+start "$net" files-ro "${with_password[@]}" -e SELKIES_FILE_TRANSFERS=true -v "$tmp/mql5:/mql5:ro"
+if ready files-ro; then
+  check "T18: with the EA folder read-only, uploads go to MetaTrader's Experts folder" \
+    "FILE_MANAGER_PATH=/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts" \
+    "$(selkies_env files-ro '^FILE_MANAGER_PATH=')"
+fi
+docker rm -f "$run-files-ro" > /dev/null
+start "$net" files-ea "${with_password[@]}" -e SELKIES_FILE_TRANSFERS=true -v "$tmp/mql5:/mql5"
+if ready files-ea; then
+  t="$run-files-ea:3001"
+  check "T18: with the EA folder writable, uploads go to its Experts" "FILE_MANAGER_PATH=/mql5/Experts" \
+    "$(selkies_env files-ea '^FILE_MANAGER_PATH=')"
+  check_true "T18: the log says so" logged files-ea "File transfers: upload,download, in /mql5/Experts."
+  check "T18: upload into the EA folder" 200 \
+    "$(code -u "$user:$password" -X POST -H "Origin: https://$t" -H 'X-Upload-Path: access-test.txt' \
+      --data-binary @/etc/hostname "https://$t/api/upload")"
+  check "T18: the upload is in the EA folder on the host" yes \
+    "$([[ -f "$tmp/mql5/Experts/access-test.txt" ]] && echo yes || echo no)"
+  # The desktop's user owns what it made there, so root removes it.
+  docker exec "$run-files-ea" find /mql5 -mindepth 1 -delete
+fi
+docker rm -f "$run-files-ea" > /dev/null
+
+echo "CUSTOM_PORT, PASSWORD and FILE_MANAGER_PATH (T3, warnings)"
+start "$net" plain -e CUSTOM_PORT=3000 -e "PASSWORD=$password" -e FILE_MANAGER_PATH=/config/uploads
 if ready plain; then
   check "T3: nothing on port 3000 with CUSTOM_PORT=3000" 000 "$(code "http://$run-plain:3000/")"
   check_true "CUSTOM_PORT is warned about" logged plain "CUSTOM_PORT is set, but there is no plain HTTP"
   check_true "PASSWORD given directly is warned about" logged plain "PASSWORD is set directly"
+  check "FILE_MANAGER_PATH (deprecated) is still honoured" "FILE_MANAGER_PATH=/config/uploads" \
+    "$(selkies_env plain '^FILE_MANAGER_PATH=')"
+  check_true "FILE_MANAGER_PATH is warned about, with its removal date" logged plain \
+    "FILE_MANAGER_PATH is deprecated, and images from 2026-12-22 on ignore it"
   check "the login works with PASSWORD" 200 "$(code -u "$user:$password" "https://$run-plain:3001/")"
 fi
 docker rm -f "$run-plain" > /dev/null
 
-echo "TLS_CERT_FILE and TLS_KEY_FILE (T9), a certificate of your own in /config/ssl (T20)"
-openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=mt-access-test \
-  -keyout "$tmp/tls.key" -out "$tmp/tls.crt" 2> /dev/null
-start "$net" tls "${with_password[@]}" \
-  -v "$tmp/tls.crt:/run/secrets/tls.crt:ro" -v "$tmp/tls.key:/run/secrets/tls.key:ro" \
-  -e TLS_CERT_FILE=/run/secrets/tls.crt -e TLS_KEY_FILE=/run/secrets/tls.key
+# tls <name> [openssl s_client options]: what s_client prints. It prints "New,
+# <protocol>, Cipher is <cipher>" for a handshake that worked, and "New, (NONE),
+# Cipher is (NONE)" for one that didn't. Its session summary names the attempted
+# protocol either way.
+tls() {
+  docker exec "$run-probe" sh -c "echo | openssl s_client -connect $run-$1:3001 ${2:-} 2>&1" || true
+}
+
+echo "A certificate of your own mounted in /config/ssl (T9)"
+start "$net" tls "${with_password[@]}" "${own_cert[@]}"
 if ready tls; then
-  # s_client prints "New, <protocol>, Cipher is <cipher>" for a handshake that
-  # worked, and "New, (NONE), Cipher is (NONE)" for one that didn't. Its
-  # session summary names the attempted protocol either way.
-  tls() {
-    docker exec "$run-probe" sh -c "echo | openssl s_client -connect $run-tls:3001 $1 2>&1" || true
-  }
-  check_true "T9: the given certificate is served" grep -q 'subject=.*CN *= *mt-access-test' <<< "$(tls '')"
-  check_true "T9: TLS 1.2 accepted" grep -q '^New, TLSv1.2, Cipher is [A-Z]' <<< "$(tls -tls1_2)"
-  check_true "T9: TLS 1.3 accepted" grep -q '^New, TLSv1.3, Cipher is [A-Z]' <<< "$(tls -tls1_3)"
-  check_true "T9: TLS 1.1 refused" grep -q '^New, (NONE), Cipher is (NONE)' <<< "$(tls '-tls1_1 -cipher DEFAULT@SECLEVEL=0')"
-  # A certificate of your own in /config/ssl. The key file belongs to whoever
-  # runs this script, so root copies it, and hands it to the desktop's user.
-  docker exec "$run-tls" sh -c 'cp /run/secrets/tls.crt /config/ssl/cert.pem && cp /run/secrets/tls.key /config/ssl/cert.key && chown abc:abc /config/ssl/cert.pem /config/ssl/cert.key'
-  own="$(docker exec "$run-tls" sha256sum /config/ssl/cert.pem)"
+  check_true "T9: the mounted certificate is served" grep -q 'subject=.*CN *= *mt-access-test' <<< "$(tls tls)"
+  check_true "T9: TLS 1.2 accepted" grep -q '^New, TLSv1.2, Cipher is [A-Z]' <<< "$(tls tls -tls1_2)"
+  check_true "T9: TLS 1.3 accepted" grep -q '^New, TLSv1.3, Cipher is [A-Z]' <<< "$(tls tls -tls1_3)"
+  check_true "T9: TLS 1.1 refused" grep -q '^New, (NONE), Cipher is (NONE)' <<< "$(tls tls '-tls1_1 -cipher DEFAULT@SECLEVEL=0')"
+  check_true "T9: the log says it's yours" logged tls "Certificate: yours, in /config/ssl."
   docker restart "$run-tls" > /dev/null
   if ready tls; then
-    check "T20: a certificate of your own in /config/ssl is left alone" "$own" \
-      "$(docker exec "$run-tls" sha256sum /config/ssl/cert.pem)"
+    check_true "T9: still served after a restart" grep -q 'subject=.*CN *= *mt-access-test' <<< "$(tls tls)"
   fi
 fi
 docker rm -f "$run-tls" > /dev/null
+
+echo "TLS_CERT_FILE and TLS_KEY_FILE, deprecated (T9)"
+start "$net" tls-env "${with_password[@]}" \
+  -v "$tmp/tls.crt:/run/secrets/tls.crt:ro" -v "$tmp/tls.key:/run/secrets/tls.key:ro" \
+  -e TLS_CERT_FILE=/run/secrets/tls.crt -e TLS_KEY_FILE=/run/secrets/tls.key
+if ready tls-env; then
+  check_true "T9: the given certificate is served" grep -q 'subject=.*CN *= *mt-access-test' <<< "$(tls tls-env)"
+  check_true "T9: they're warned about, with their removal date" logged tls-env \
+    "TLS_CERT_FILE and TLS_KEY_FILE are deprecated, and images from 2026-12-22 on ignore them"
+fi
+docker rm -f "$run-tls-env" > /dev/null
+
+echo "A certificate of your own copied into /config/ssl, and an empty one (T20)"
+start "$net" tls-copy "${with_password[@]}" \
+  -v "$tmp/tls.crt:/run/secrets/tls.crt:ro" -v "$tmp/tls.key:/run/secrets/tls.key:ro"
+if ready tls-copy; then
+  # The key file belongs to whoever runs this script, so root copies it, and
+  # hands it to the desktop's user.
+  docker exec "$run-tls-copy" sh -c 'cp /run/secrets/tls.crt /config/ssl/cert.pem && cp /run/secrets/tls.key /config/ssl/cert.key && chown abc:abc /config/ssl/cert.pem /config/ssl/cert.key'
+  own="$(docker exec "$run-tls-copy" sha256sum /config/ssl/cert.pem)"
+  docker restart "$run-tls-copy" > /dev/null
+  if ready tls-copy; then
+    check "T20: a certificate of your own in /config/ssl is left alone" "$own" \
+      "$(docker exec "$run-tls-copy" sha256sum /config/ssl/cert.pem)"
+    # What a removed mount leaves behind.
+    docker exec "$run-tls-copy" sh -c ': > /config/ssl/cert.pem && : > /config/ssl/cert.key'
+    docker restart "$run-tls-copy" > /dev/null
+    if ready tls-copy; then
+      check "T20: an empty cert.pem is replaced with the container's own" 825 "$(cert_days tls-copy)"
+      check "T20: the log says it was made, at the first start and again now" 2 \
+        "$(docker logs "$run-tls-copy" 2>&1 | grep -cF "[mt-cert] Made the desktop's own certificate" || true)"
+    fi
+  fi
+fi
+docker rm -f "$run-tls-copy" > /dev/null
 
 echo "A VPN sidecar's network (T11)"
 docker run -d --name "$run-tailnet" --network "$net" --cap-add NET_ADMIN --memory 128m --entrypoint sh "$image" \
