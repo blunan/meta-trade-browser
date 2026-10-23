@@ -59,7 +59,7 @@ Keep the password in your password manager; from then on, `sudo cat secrets/pass
 # The quick start creates the folders and the password file first.
 services:
   mt-browser:
-    image: ghcr.io/blunan/mt-browser:latest    # or a date tag such as :20261019, to stay on one build
+    image: ghcr.io/blunan/mt-browser:latest    # or a date tag such as :20261019.1, to stay on one build
     container_name: mt-browser
     restart: unless-stopped
     stop_grace_period: 30s                     # time for MetaTrader to save its charts and settings

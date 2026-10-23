@@ -244,10 +244,12 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: cosign sign --yes "$IMAGE@$DIGEST"
 
-      # latest moves; a date tag never does (a second build that day gets .2);
-      # sha-<commit> names the first build of that commit. Existing tags come
-      # from the tag list, and each tag is a push of the index read above, so
-      # no other build is read.
+      # latest moves; a date tag never does. A date tag is YYYYMMDD.N, N one
+      # more than the day's highest, so every one has two numbers: update
+      # tools such as WUD only compare tags with as many numbers as the one
+      # running. sha-<commit> names the first build of that commit. Existing
+      # tags come from the tag list, and each tag is a push of the index read
+      # above, so no other build is read.
       - name: Tag
         working-directory: ${{ runner.temp }}
         env:
@@ -267,12 +269,8 @@ jobs:
           done
           has() { printf '%s\n' "${existing[@]}" | grep -qx -- "$1"; }
           day="$(date -u +%Y%m%d)"
-          date_tag="$day"
-          n=1
-          while has "$date_tag"; do
-            n=$((n + 1))
-            date_tag="$day.$n"
-          done
+          last="$(printf '%s\n' "${existing[@]}" | sed -n -E "s/^$day\.([0-9]+)$/\1/p" | sort -n | tail -n 1)"
+          date_tag="$day.$((${last:-0} + 1))"
           tags=(latest "$date_tag")
           has "sha-${GITHUB_SHA::7}" || tags+=("sha-${GITHUB_SHA::7}")
           type="$(jq -r .mediaType index.json)"
