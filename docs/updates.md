@@ -4,7 +4,7 @@
 
 - **Tags:**
     - `latest` follows every new build;
-    - a date tag, such as `20261019`, stays on one build. A second build that day gets `20261019.2`;
+    - a date tag, such as `20261019.1`, stays on one build. A second build that day gets `20261019.2`. Every date tag has this form, so update tools that compare tags, such as WUD, offer each newer one;
     - `sha-<commit>` names the first build of that source commit.
 - **New builds** come with every change to the image, including updates of the base image it's built on, which also bring Debian's fixes.
 - **Going back:** use the previous date tag in place of `latest`, the same way.
