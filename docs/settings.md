@@ -1,8 +1,30 @@
-# Settings
+# Folders and settings
 
-Set these under `environment` in `compose.yaml`, or with `-e` in `docker run`. Changes take effect when the container is recreated: `docker compose up -d`, or remove the container and run it again.
+What needs files, such as your EAs or a certificate of your own, needs no environment setting: you mount the files in the right place. Environment settings go under `environment` in `compose.yaml`, or with `-e` in `docker run`. Changes take effect when the container is recreated: `docker compose up -d`, or remove the container and run it again.
 
-What needs files, such as your EAs or a certificate of your own, needs no setting: you mount the files in the right place (see [Folders and files](folders.md)).
+## Folders and files
+
+| In the container | On the server | What's in it |
+|---|---|---|
+| `/config` (required) | `./data` | Everything for the account: Wine, the MetaTrader program, account logins and servers, charts with their EAs and inputs, settings, price history and logs, and the desktop's certificate. MetaTrader updates itself here. |
+| `/mql5` (optional) | `./ea` | Your own EAs, indicators and scripts, laid out like MetaTrader's `MQL5` folder: `Experts`, `Indicators`, `Scripts`, `Include`, `Libraries`, `Presets`. |
+| `/run/secrets/password` | `./secrets/password` | The desktop password. |
+| `/config/ssl/cert.pem`, `/config/ssl/cert.key` (optional) | your certificate's files, such as `./tls/cert.pem` | A certificate of your own, and its key (see [Your own certificate](access.md#your-own-certificate)). |
+
+### `/config`
+
+- It's a bind mount (a host folder), not a named Docker volume. `docker system prune --volumes` can't delete it while the container is stopped, and it's easy to back up.
+- Keep it at mode `0700`: it holds saved broker logins. The container makes user 1000 (`PUID`) its owner at every start, and its log warns if other users on the host have any access to it.
+- Back up `data` and the EA folder regularly, encrypted, and try a restore now and then.
+
+### The EA folder (`/mql5`)
+
+- Each of its sections appears in MetaTrader as a subfolder named `Mounted`, such as `MQL5/Experts/Mounted`.
+- `Files` is never linked, because EAs keep their own data there.
+- A missing section is created when the folder is writable, and skipped when it's read-only (`./ea:/mql5:ro`).
+- On its first start, MetaTrader compiles the sources it finds there.
+- *Refresh* in the Navigator shows files added on the host.
+- With [file transfers](#the-main-settings) on, uploads land in its `Experts`, and appear in the Navigator under *Expert Advisors → Mounted* after *Refresh*. When it's read-only, or not mounted, they land in MetaTrader's own `MQL5/Experts`, in `data`.
 
 ## The main settings
 
@@ -14,12 +36,12 @@ What needs files, such as your EAs or a certificate of your own, needs no settin
 | `TITLE` | `MetaTrader` | The browser tab's name. |
 | `TZ` | UTC | The desktop's time zone. MetaTrader shows its server's time anyway. |
 | `SELKIES_CLIPBOARD_ENABLED` | `true` | The shared clipboard: `true`, `in` (browser to desktop only), `out` (desktop to browser only) or `false`. |
-| `SELKIES_FILE_TRANSFERS` | `false` | `true` turns on file transfers through the browser, and the side panel's file panel with them. `upload` or `download` allows one direction only. Uploads land in the [EA folder](folders.md#the-ea-folder-mql5)'s `Experts` when it's mounted and writable, and appear in the Navigator under *Expert Advisors → Mounted* after *Refresh*. Otherwise they land in MetaTrader's own `MQL5/Experts`, in `/config`, and appear under *Expert Advisors*. The file panel offers downloads from the same folder, and can't choose another. |
-| `MT_AI_AGENTS` | off | `true` turns on MetaTrader's and MetaEditor's servers for AI agents (see [What it connects to](network.md#metatraders-ai-agent-servers)). |
+| `SELKIES_FILE_TRANSFERS` | `false` | `true` turns on file transfers through the browser, and the side panel's file panel with them. `upload` or `download` allows one direction only. Uploads land in the [EA folder](#the-ea-folder-mql5)'s `Experts` when it's mounted and writable, and appear in the Navigator under *Expert Advisors → Mounted* after *Refresh*. Otherwise they land in MetaTrader's own `MQL5/Experts`, in `/config`, and appear under *Expert Advisors*. The file panel offers downloads from the same folder, and can't choose another. |
+| `MT_AI_AGENTS` | off | `true` turns on MetaTrader's and MetaEditor's servers for AI agents (see [MetaTrader's AI-agent servers](verify.md#metatraders-ai-agent-servers)). |
 
 ## Reverse proxy, VPN and host networking
 
-See [Reaching the desktop](access.md). A certificate of your own needs no setting: see [Your own certificate](folders.md#your-own-certificate).
+See [Access and reverse proxy](access.md). A certificate of your own needs no setting: see [Your own certificate](access.md#your-own-certificate).
 
 | Setting | Default | What it does |
 |---|---|---|
@@ -32,7 +54,7 @@ See [Reaching the desktop](access.md). A certificate of your own needs no settin
 ## Settings that go together
 
 - `PUID` and `PGID`: set both, to your `id -u` and `id -g`.
-- `TRUSTED_PROXIES` needs the proxy and the container on a Docker network of their own. The SSH tunnel then gets 403, so if the proxy is your only way in, remove `ports` (see [What every proxy needs](reverse-proxy.md#what-every-proxy-needs)).
+- `TRUSTED_PROXIES` needs the proxy and the container on a Docker network of their own. The SSH tunnel then gets 403, so if the proxy is your only way in, remove `ports` (see [What every proxy needs](access.md#what-every-proxy-needs)).
 - `SELKIES_ALLOWED_ORIGINS` is needed only when your proxy replaces the `Host` header.
 - `SUBFOLDER` needs a proxy that forwards the path as it is, without removing it.
 - `LISTEN_ADDRESS` and `CUSTOM_HTTPS_PORT` are for host networking. On Docker's default network, change the server's port in `ports` instead: `127.0.0.1:3101:3001` serves the desktop on the server's port 3101.
@@ -58,7 +80,7 @@ Still read, with a warning in the log. Images from 2026-12-22 on ignore them.
 
 | Setting | Instead |
 |---|---|
-| `TLS_CERT_FILE`, `TLS_KEY_FILE` | Mount your certificate and key at `/config/ssl/cert.pem` and `cert.key` (see [Your own certificate](folders.md#your-own-certificate)). |
+| `TLS_CERT_FILE`, `TLS_KEY_FILE` | Mount your certificate and key at `/config/ssl/cert.pem` and `cert.key` (see [Your own certificate](access.md#your-own-certificate)). |
 | `FILE_MANAGER_PATH` | Nothing: uploads land in the EA folder's `Experts` when it's mounted and writable, otherwise in MetaTrader's own (see `SELKIES_FILE_TRANSFERS` above). |
 
 ## Refused

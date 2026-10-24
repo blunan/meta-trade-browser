@@ -1,5 +1,7 @@
 # Build it yourself
 
+## Local build and tests
+
 ```sh
 git clone https://github.com/blunan/mt-browser.git
 cd mt-browser
