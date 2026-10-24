@@ -37,7 +37,6 @@ theme:
     - content.tabs.link
     - search.highlight
     - toc.follow
-    - toc.integrate                            # the page's headings in the left tree, no right panel
 
 plugins:
   - search
@@ -68,18 +67,12 @@ nav:
   - Home: index.md
   - Getting started:
       - Quick start: quick-start.md
-      - Folders and files: folders.md
-  - Using it:
-      - Reaching the desktop: access.md
-      - Behind a reverse proxy: reverse-proxy.md
+      - Access and reverse proxy: access.md
+      - Folders and settings: settings.md
+  - Using and running:
       - Using MetaTrader: using.md
-      - Settings: settings.md
-  - Running it:
-      - Stopping, restarts and health: operations.md
-      - Updates: updates.md
+      - Operations and updates: operations.md
       - Troubleshooting: troubleshooting.md
   - Reference:
-      - What it connects to: network.md
-      - What isn't supported: limitations.md
-      - Verify the image: verify.md
+      - Security and verification: verify.md
       - Build it yourself: building.md

@@ -1,6 +1,6 @@
 # Quick start
 
-You need a Linux server with Docker Engine on amd64, about 4 GB of memory, and SSH access (see [What you need](index.md#what-you-need)).
+You need a Linux server with Docker Engine on amd64 (x86-64), about 4 GB of memory and 10 GB of disk, and SSH access (see [What you need](index.md#what-you-need)).
 
 ## 1. Create the folders
 
@@ -12,7 +12,9 @@ mkdir -p -m 700 data secrets
 mkdir -p ea
 ```
 
-`data` will hold your saved broker logins, so only you may open it. `ea` is the optional EA folder. The container works as user and group 1000. If `id -u` or `id -g` prints another number, set `PUID` and `PGID` to them (see [Settings](settings.md)).
+`data` will hold your saved broker logins, so only you may open it. `ea` is the optional EA folder.
+
+The container works as user and group `1000`. Check yours with `id -u` and `id -g`: if either prints another number, add `PUID` and `PGID` under `environment` in `compose.yaml` (or `-e PUID=$(id -u) -e PGID=$(id -g)` in `docker run`; see [Folders and settings](settings.md#the-main-settings)).
 
 ## 2. Create the desktop password
 
@@ -100,7 +102,7 @@ Then browse to `https://localhost:3001`. The browser warns about the certificate
 
 To stop the warning for good, trust that certificate on your computer: copy `data/ssl/cert.pem` from the server, and add it to your trusted certificates (on macOS, open it in Keychain Access and set it to *Always Trust*). It's issued to `localhost` and `127.0.0.1` only, and it can't vouch for any other site. The container renews it about every two years, when it needs trusting again.
 
-Other ways in, such as a VPN or your own domain behind a reverse proxy, are in [Reaching the desktop](access.md).
+Other ways in, such as a VPN, Tailscale or your own domain behind a reverse proxy, are in [Access and reverse proxy](access.md).
 
 ## 6. Set up MetaTrader
 

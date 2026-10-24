@@ -109,14 +109,13 @@ Then browse to `https://localhost:3001`, and accept the certificate warning: the
 | Page | What's in it |
 | :--- | :--- |
 | 🚀 [Quick start](https://mt-browser.blunan.com/quick-start/) | Every step in full, with `docker run` as well as Compose, and how to trust the certificate |
-| 🗂️ [Folders and files](https://mt-browser.blunan.com/folders/) | What `data`, `ea` and the password file hold, and backups |
-| 🌍 [Reaching the desktop](https://mt-browser.blunan.com/access/) | SSH tunnel, VPN, Tailscale and host networking |
-| 🔀 [Behind a reverse proxy](https://mt-browser.blunan.com/reverse-proxy/) | Your own domain with Caddy, nginx, Traefik or cloudflared |
+| 🌍 [Access and reverse proxy](https://mt-browser.blunan.com/access/) | SSH tunnel, VPN, Tailscale, Caddy, nginx, Traefik, cloudflared, your own certificate and host networking |
+| ⚙️ [Folders and settings](https://mt-browser.blunan.com/settings/) | What `data`, `ea` and the password file hold, backups, every setting, and what the startup check refuses or warns about |
 | 🖱️ [Using MetaTrader](https://mt-browser.blunan.com/using/) | Clipboard, sound, shortcuts, MetaEditor, the HTML panes and memory |
-| ⚙️ [Settings](https://mt-browser.blunan.com/settings/) | Every setting, and what the startup check refuses or warns about |
-| 🔄 [Updates](https://mt-browser.blunan.com/updates/) | Image tags, updating and going back, and MetaTrader's LiveUpdate |
+| 🔄 [Operations and updates](https://mt-browser.blunan.com/operations/) | Stopping, restarts, health check, image tags, updating and MetaTrader's LiveUpdate |
 | 🩺 [Troubleshooting](https://mt-browser.blunan.com/troubleshooting/) | Where the logs are, failed installs and harmless messages |
-| 🔏 [Verify the image](https://mt-browser.blunan.com/verify/) | Pin a digest and check its cosign signature |
+| 🔏 [Security and verification](https://mt-browser.blunan.com/verify/) | Pin a digest and check its cosign signature, outgoing connections and AI-agent servers |
+| 🛠️ [Build it yourself](https://mt-browser.blunan.com/building/) | Local build, access tests, CI and building the guide |
 
 ## 📄 License
 
