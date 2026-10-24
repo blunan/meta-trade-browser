@@ -231,7 +231,9 @@ if [[ "$cert_public" != "$key_public" ]]; then
   refuse "the certificate and the key don't belong together." "$cert" "$key"
 fi
 if [[ -z "${cert_source:-}" ]]; then
-  if [[ "$(openssl x509 -in "$cert" -noout -subject -issuer)" == $'subject=O=mt-browser, CN=localhost\nissuer=O=mt-browser, CN=localhost' ]]; then
+  cert_ids="$(openssl x509 -in "$cert" -noout -subject -issuer)"
+  if [[ "$cert_ids" == $'subject=O=meta-trade-browser, CN=localhost\nissuer=O=meta-trade-browser, CN=localhost' ||
+    "$cert_ids" == $'subject=O=mt-browser, CN=localhost\nissuer=O=mt-browser, CN=localhost' ]]; then
     cert_source="the container's own, in /config/ssl"
   else
     cert_source="yours, in /config/ssl"
