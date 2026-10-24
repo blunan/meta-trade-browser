@@ -3,9 +3,9 @@
 ## Local build and tests
 
 ```sh
-git clone https://github.com/blunan/mt-browser.git
-cd mt-browser
-docker build -t mt-browser:dev .
+git clone https://github.com/blunan/meta-trade-browser.git
+cd meta-trade-browser
+docker build -t meta-trade-browser:dev .
 tests/access.sh
 ```
 

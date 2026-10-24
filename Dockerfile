@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# mt-browser: MetaTrader in the browser, on linuxserver's Selkies desktop.
+# meta-trade-browser: MetaTrader in the browser, on linuxserver's Selkies desktop.
 FROM ghcr.io/linuxserver/baseimage-selkies:debiantrixie@sha256:fefbb88bff4cc8294ad42678b62f7c912da12e88dc4167101b161549fb4ad2d1
 
 # Wine's Windows DLLs carry debug information that only crash backtraces use.
@@ -191,19 +191,19 @@ ARG IMAGE_VERSION=dev
 ARG IMAGE_REVISION=
 ARG IMAGE_CREATED=
 # Every label the base sets describes the base, so each one is replaced.
-LABEL org.opencontainers.image.title="mt-browser" \
+LABEL org.opencontainers.image.title="meta-trade-browser" \
       org.opencontainers.image.description="MetaTrader in the browser: WineHQ staging on linuxserver's Selkies desktop, secure by default. Not affiliated with MetaQuotes or Microsoft." \
       org.opencontainers.image.authors="Brayan Luna" \
       org.opencontainers.image.vendor="Brayan Luna" \
       org.opencontainers.image.licenses="GPL-3.0-only" \
-      org.opencontainers.image.source="https://github.com/blunan/mt-browser" \
-      org.opencontainers.image.url="https://github.com/blunan/mt-browser" \
-      org.opencontainers.image.documentation="https://github.com/blunan/mt-browser#readme" \
+      org.opencontainers.image.source="https://github.com/blunan/meta-trade-browser" \
+      org.opencontainers.image.url="https://github.com/blunan/meta-trade-browser" \
+      org.opencontainers.image.documentation="https://github.com/blunan/meta-trade-browser#readme" \
       org.opencontainers.image.version="${IMAGE_VERSION}" \
       org.opencontainers.image.revision="${IMAGE_REVISION}" \
       org.opencontainers.image.created="${IMAGE_CREATED}" \
       org.opencontainers.image.ref.name="" \
-      build_version="mt-browser version ${IMAGE_VERSION}" \
+      build_version="meta-trade-browser version ${IMAGE_VERSION}" \
       maintainer="Brayan Luna"
 
 # Healthy while MetaTrader runs and the desktop answers. The first start installs for
