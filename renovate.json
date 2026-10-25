@@ -1,7 +1,10 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Update PRs for the base image's digest, the workflows' actions, and the cosign and Trivy versions. Nothing merges by itself.",
+  "description": "Update PRs for the base image's digest, the workflows' actions, and the cosign and Trivy versions; minor and patch updates come together in one PR on Monday mornings. Nothing merges by itself, and Renovate never asks GitHub to auto-merge.",
   "extends": ["config:recommended"],
+  "timezone": "America/Mexico_City",
+  "automerge": false,
+  "platformAutomerge": false,
   "dependencyDashboard": true,
   "minimumReleaseAge": "14 days",
   "internalChecksFilter": "strict",
@@ -12,6 +15,12 @@
       "description": "GHCR gives image digests no release date, so the base image's updates can't wait 14 days: review and the PR's Image tests are the gate.",
       "matchDatasources": ["docker"],
       "minimumReleaseAgeBehaviour": "timestamp-optional"
+    },
+    {
+      "description": "Minor and patch updates come together in one PR on Monday mornings, so merging them publishes one image a week, not one per update. Majors and the base image's digest keep their own PRs.",
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "minor and patch updates",
+      "schedule": ["* 0-5 * * 1"]
     }
   ],
   "customManagers": [
