@@ -1,13 +1,15 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Update PRs for the base image's digest, the workflows' actions, and the cosign and Trivy versions; minor and patch updates come together in one PR on Monday mornings. Nothing merges by itself, and Renovate never asks GitHub to auto-merge.",
-  "extends": ["config:recommended"],
+  "description": "Update PRs for the base image's digest, the workflows' actions, and the cosign and Trivy versions. On Monday mornings the workflows' actions, runners and Python version come together in one PR, and the other minor and patch updates in another. Actions stay pinned to commit SHAs. Nothing merges by itself, and Renovate never asks GitHub to auto-merge. When a setting here is renamed or deprecated, Renovate opens a PR that migrates this file.",
+  "extends": [
+    "config:recommended",
+    ":configMigration"
+  ],
   "timezone": "America/Mexico_City",
-  "automerge": false,
-  "platformAutomerge": false,
-  "dependencyDashboard": true,
   "minimumReleaseAge": "14 days",
   "internalChecksFilter": "strict",
+  "automerge": false,
+  "platformAutomerge": false,
   "ignorePaths": ["docs/requirements.in", "docs/requirements.txt"],
   "ignoreDeps": ["ghcr.io/blunan/meta-trade-browser"],
   "packageRules": [
@@ -18,8 +20,16 @@
     },
     {
       "description": "Minor and patch updates come together in one PR on Monday mornings, so merging them publishes one image a week, not one per update. Majors and the base image's digest keep their own PRs.",
+      "matchManagers": ["!github-actions"],
       "matchUpdateTypes": ["minor", "patch"],
-      "groupName": "minor and patch updates",
+      "groupName": "Minor and patch updates",
+      "schedule": ["* 0-5 * * 1"]
+    },
+    {
+      "description": "Everything the github-actions manager finds in the workflows (the actions, the runners and the docs build's Python version) comes together on the same Monday schedule: pins, digests, minor and patch updates in one PR, majors in a second. The rule above skips this manager, so no update matches both rules.",
+      "matchManagers": ["github-actions"],
+      "pinDigests": true,
+      "groupName": "GitHub Actions",
       "schedule": ["* 0-5 * * 1"]
     }
   ],
