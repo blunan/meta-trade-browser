@@ -3,9 +3,9 @@
 ## Local build and tests
 
 ```sh
-git clone https://github.com/blunan/meta-trade-browser.git
-cd meta-trade-browser
-docker build -t meta-trade-browser:dev .
+git clone https://github.com/blunan/metatrader-docker.git
+cd metatrader-docker
+docker build -t metatrader-docker:dev .
 tests/access.sh
 ```
 

@@ -1,10 +1,10 @@
-# The guide at https://meta-trade-browser.blunan.com/, built by .github/workflows/docs.yml.
+# The guide at https://metatrader-docker.blunan.com/, built by .github/workflows/docs.yml.
 # Preview it locally: see docs/building.md.
-site_name: meta-trade-browser
+site_name: metatrader-docker
 site_description: MetaTrader in your browser, in a hardened container.
-site_url: https://meta-trade-browser.blunan.com/
-repo_url: https://github.com/blunan/meta-trade-browser
-repo_name: blunan/meta-trade-browser
+site_url: https://metatrader-docker.blunan.com/
+repo_url: https://github.com/blunan/metatrader-docker
+repo_name: blunan/metatrader-docker
 edit_uri: ""
 copyright: Copyright &copy; 2026 Brayan Luna &middot; GPL-3.0
 exclude_docs: |

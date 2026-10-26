@@ -1,5 +1,5 @@
 # Builds the guide from docs/ and publishes it to GitHub Pages, at
-# https://meta-trade-browser.blunan.com/ (the domain is set in the repository's Pages
+# https://metatrader-docker.blunan.com/ (the domain is set in the repository's Pages
 # settings, not in a CNAME file). Pull requests only build and check it.
 # "Docs build" is a required check, so it runs on every PR, in about 20 s.
 # There are no manual runs: the guide changes only through a merged PR.

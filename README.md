@@ -1,10 +1,10 @@
-# 📈 meta-trade-browser
+# 📈 metatrader-docker
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
-[![Docs](https://img.shields.io/badge/docs-meta--trade--browser.blunan.com-526CFE?logo=materialformkdocs&logoColor=white)](https://meta-trade-browser.blunan.com/)
-[![Image](https://img.shields.io/badge/image-ghcr.io%2Fblunan%2Fmeta--trade--browser-2496ED?logo=docker&logoColor=white)](https://github.com/blunan/meta-trade-browser/pkgs/container/meta-trade-browser)
-[![Image build](https://github.com/blunan/meta-trade-browser/actions/workflows/image.yml/badge.svg?branch=main)](https://github.com/blunan/meta-trade-browser/actions/workflows/image.yml)
-[![Signed with cosign](https://img.shields.io/badge/signed-cosign-6D28D9)](https://meta-trade-browser.blunan.com/verify/)
+[![Docs](https://img.shields.io/badge/docs-metatrader--docker.blunan.com-526CFE?logo=materialformkdocs&logoColor=white)](https://metatrader-docker.blunan.com/)
+[![Image](https://img.shields.io/badge/image-ghcr.io%2Fblunan%2Fmetatrader--docker-2496ED?logo=docker&logoColor=white)](https://github.com/blunan/metatrader-docker/pkgs/container/metatrader-docker)
+[![Image build](https://github.com/blunan/metatrader-docker/actions/workflows/image.yml/badge.svg?branch=main)](https://github.com/blunan/metatrader-docker/actions/workflows/image.yml)
+[![Signed with cosign](https://img.shields.io/badge/signed-cosign-6D28D9)](https://metatrader-docker.blunan.com/verify/)
 ![Platform: linux/amd64](https://img.shields.io/badge/platform-linux%2Famd64-lightgrey?logo=linux&logoColor=white)
 ![MetaTrader 5](https://img.shields.io/badge/MetaTrader-5-4A76B8)
 ![Wine staging](https://img.shields.io/badge/Wine-staging-800000?logo=wine&logoColor=white)
@@ -14,7 +14,7 @@
 
 It installs MetaTrader 5, MetaQuotes' current release, and runs it under WineHQ staging (Wine runs Windows programs on Linux) on [linuxserver.io's Selkies desktop](https://github.com/linuxserver/docker-baseimage-selkies), Debian 13.
 
-> 📖 **The full guide is at [meta-trade-browser.blunan.com](https://meta-trade-browser.blunan.com/):** reverse proxies and VPNs, settings, updates and troubleshooting.
+> 📖 **The full guide is at [metatrader-docker.blunan.com](https://metatrader-docker.blunan.com/):** reverse proxies and VPNs, settings, updates and troubleshooting.
 
 ## ✨ Features
 
@@ -41,7 +41,7 @@ It installs MetaTrader 5, MetaQuotes' current release, and runs it under WineHQ 
 **1. Create the folders and the desktop password** on the server:
 
 ```sh
-mkdir -p meta-trade-browser && cd meta-trade-browser
+mkdir -p metatrader-docker && cd metatrader-docker
 mkdir -p -m 700 data secrets
 mkdir -p ea
 openssl rand -base64 24 | tr -d '\n' > secrets/password
@@ -55,12 +55,12 @@ Keep the password in your password manager; from then on, `sudo cat secrets/pass
 **2. Save this as `compose.yaml`** in the same folder:
 
 ```yaml
-# meta-trade-browser: MetaTrader in your browser, one container for one trading account.
+# metatrader-docker: MetaTrader in your browser, one container for one trading account.
 # The quick start creates the folders and the password file first.
 services:
-  meta-trade-browser:
-    image: ghcr.io/blunan/meta-trade-browser:latest    # or a date tag such as :20261019.1, to stay on one build
-    container_name: meta-trade-browser
+  metatrader-docker:
+    image: ghcr.io/blunan/metatrader-docker:latest    # or a date tag such as :20261019.1, to stay on one build
+    container_name: metatrader-docker
     restart: unless-stopped
     stop_grace_period: 30s                     # time for MetaTrader to save its charts and settings
     # Never add init: true: the image's own supervisor has to be process 1.
@@ -83,7 +83,7 @@ secrets:
     file: ./secrets/password
 ```
 
-Without Compose, the guide's [quick start](https://meta-trade-browser.blunan.com/quick-start/#4-start-it) has the same container as a `docker run` command.
+Without Compose, the guide's [quick start](https://metatrader-docker.blunan.com/quick-start/#4-start-it) has the same container as a `docker run` command.
 
 **3. Start it** and follow its log:
 
@@ -100,22 +100,22 @@ The first start installs Microsoft Edge WebView2 and MetaTrader. It takes about 
 ssh -N -L 3001:127.0.0.1:3001 you@your-server
 ```
 
-Then browse to `https://localhost:3001`, and accept the certificate warning: the container made its own certificate (the guide shows [how to trust it](https://meta-trade-browser.blunan.com/quick-start/#5-open-the-desktop)). Sign in as `trader` with the password.
+Then browse to `https://localhost:3001`, and accept the certificate warning: the container made its own certificate (the guide shows [how to trust it](https://metatrader-docker.blunan.com/quick-start/#5-open-the-desktop)). Sign in as `trader` with the password.
 
-**5. Set up MetaTrader.** Log in to your trading account with *Save password* ticked. Before an EA trades, turn on MetaTrader's algo-trading protections, as the guide's [step 6](https://meta-trade-browser.blunan.com/quick-start/#6-set-up-metatrader) shows.
+**5. Set up MetaTrader.** Log in to your trading account with *Save password* ticked. Before an EA trades, turn on MetaTrader's algo-trading protections, as the guide's [step 6](https://metatrader-docker.blunan.com/quick-start/#6-set-up-metatrader) shows.
 
 ## 📖 The guide
 
 | Page | What's in it |
 | :--- | :--- |
-| 🚀 [Quick start](https://meta-trade-browser.blunan.com/quick-start/) | Every step in full, with `docker run` as well as Compose, and how to trust the certificate |
-| 🌍 [Access and reverse proxy](https://meta-trade-browser.blunan.com/access/) | SSH tunnel, VPN, Tailscale, Caddy, nginx, Traefik, cloudflared, your own certificate and host networking |
-| ⚙️ [Folders and settings](https://meta-trade-browser.blunan.com/settings/) | What `data`, `ea` and the password file hold, backups, every setting, and what the startup check refuses or warns about |
-| 🖱️ [Using MetaTrader](https://meta-trade-browser.blunan.com/using/) | Clipboard, sound, shortcuts, MetaEditor, the HTML panes and memory |
-| 🔄 [Operations and updates](https://meta-trade-browser.blunan.com/operations/) | Stopping, restarts, health check, image tags, updating and MetaTrader's LiveUpdate |
-| 🩺 [Troubleshooting](https://meta-trade-browser.blunan.com/troubleshooting/) | Where the logs are, failed installs and harmless messages |
-| 🔏 [Security and verification](https://meta-trade-browser.blunan.com/verify/) | Pin a digest and check its cosign signature, outgoing connections and AI-agent servers |
-| 🛠️ [Build it yourself](https://meta-trade-browser.blunan.com/building/) | Local build, access tests, CI and building the guide |
+| 🚀 [Quick start](https://metatrader-docker.blunan.com/quick-start/) | Every step in full, with `docker run` as well as Compose, and how to trust the certificate |
+| 🌍 [Access and reverse proxy](https://metatrader-docker.blunan.com/access/) | SSH tunnel, VPN, Tailscale, Caddy, nginx, Traefik, cloudflared, your own certificate and host networking |
+| ⚙️ [Folders and settings](https://metatrader-docker.blunan.com/settings/) | What `data`, `ea` and the password file hold, backups, every setting, and what the startup check refuses or warns about |
+| 🖱️ [Using MetaTrader](https://metatrader-docker.blunan.com/using/) | Clipboard, sound, shortcuts, MetaEditor, the HTML panes and memory |
+| 🔄 [Operations and updates](https://metatrader-docker.blunan.com/operations/) | Stopping, restarts, health check, image tags, updating and MetaTrader's LiveUpdate |
+| 🩺 [Troubleshooting](https://metatrader-docker.blunan.com/troubleshooting/) | Where the logs are, failed installs and harmless messages |
+| 🔏 [Security and verification](https://metatrader-docker.blunan.com/verify/) | Pin a digest and check its cosign signature, outgoing connections and AI-agent servers |
+| 🛠️ [Build it yourself](https://metatrader-docker.blunan.com/building/) | Local build, access tests, CI and building the guide |
 
 ## 📄 License
 
