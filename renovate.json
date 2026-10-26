@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Update PRs for the base image's digest, the workflows' actions, and the cosign and Trivy versions. On Monday mornings the workflows' actions, runners and Python version come together in one PR, and the other minor and patch updates in another. Actions stay pinned to commit SHAs. Nothing merges by itself, and Renovate never asks GitHub to auto-merge. When a setting here is renamed or deprecated, Renovate opens a PR that migrates this file.",
+  "description": "Update PRs for the base image's digest, Wine, the workflows' actions, and the cosign and Trivy versions. On Monday mornings the workflows' actions, runners and Python version come together in one PR, Wine comes in its own, and the other minor and patch updates in a third. Actions stay pinned to commit SHAs. Nothing merges by itself, and Renovate never asks GitHub to auto-merge. When a setting here is renamed or deprecated, Renovate opens a PR that migrates this file.",
   "extends": [
     "config:recommended",
     ":configMigration"
@@ -19,8 +19,9 @@
       "minimumReleaseAgeBehaviour": "timestamp-optional"
     },
     {
-      "description": "Minor and patch updates come together in one PR on Monday mornings, so merging them publishes one image a week, not one per update. Majors and the base image's digest keep their own PRs.",
+      "description": "Minor and patch updates come together in one PR on Monday mornings, so merging them publishes one image a week, not one per update. Majors, the base image's digest and Wine keep their own PRs.",
       "matchManagers": ["!github-actions"],
+      "matchDepNames": ["!winehq-staging"],
       "matchUpdateTypes": ["minor", "patch"],
       "groupName": "Minor and patch updates",
       "schedule": ["* 0-5 * * 1"]
@@ -31,6 +32,18 @@
       "pinDigests": true,
       "groupName": "GitHub Actions",
       "schedule": ["* 0-5 * * 1"]
+    },
+    {
+      "description": "Wine (WINE_VERSION in the Dockerfile) comes from WineHQ's Debian 13 repository, which gives no release dates either, so its updates can't wait 14 days. Release candidates are left out. Each release comes in its own PR on Monday mornings, and a PR that isn't merged moves on to newer releases. CI doesn't install MetaTrader, so a first start is checked by hand before merging. The minor and patch rule skips Wine, so no update matches both rules.",
+      "matchDepNames": ["winehq-staging"],
+      "registryUrls": ["https://dl.winehq.org/wine-builds/debian?suite=trixie&components=main&binaryArch=amd64"],
+      "allowedVersions": "/^\\d+(\\.\\d+)+~trixie-\\d+$/",
+      "minimumReleaseAgeBehaviour": "timestamp-optional",
+      "commitMessageTopic": "Wine",
+      "schedule": ["* 0-5 * * 1"],
+      "prBodyNotes": [
+        "CI doesn't install MetaTrader, so check this Wine before merging: build this branch and start it with `tests/compose.dev.yaml`. The log should show both `signature ok` lines and `starting MetaTrader`, and the container should turn `healthy`. With a demo account logged in, MetaTrader should log back in after each of a few restarts."
+      ]
     }
   ],
   "customManagers": [
@@ -40,6 +53,14 @@
       "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\s+[A-Z_]+: (?<currentValue>\\S+)"
+      ]
+    },
+    {
+      "customType": "regex",
+      "description": "Versions in the Dockerfile's ARG lines, marked with a '# renovate:' comment.",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\s+ARG [A-Z_]+=(?<currentValue>\\S+)"
       ]
     }
   ]

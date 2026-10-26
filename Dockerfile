@@ -6,6 +6,11 @@ FROM ghcr.io/linuxserver/baseimage-selkies:debiantrixie@sha256:df4a9259e75355260
 # Stripping it saves about 1 GB unpacked. Set to false for a troubleshooting build.
 ARG STRIP_WINE_DEBUG=true
 
+# The WineHQ staging release the Wine step installs. Renovate proposes each new
+# one in its own pull request.
+# renovate: datasource=deb depName=winehq-staging
+ARG WINE_VERSION=11.19~trixie-1
+
 # Same-origin streaming only, no commands from the web page, no switch to
 # WebRTC, and Selkies on a socket file that only nginx can reach. MetaTrader's
 # sounds play in the browser, but the microphone and webcam are locked off, and
@@ -45,9 +50,11 @@ ENV TITLE=MetaTrader \
     NO_GAMEPAD=true \
     S6_BEHAVIOUR_IF_STAGE2_FAILS=2
 
-# Wine: WineHQ staging, pinned. The repository key is trusted only if its
-# fingerprint matches. The strip and the purge run in this same layer, so what
-# they remove doesn't stay behind in it.
+# Wine: WineHQ staging, pinned to WINE_VERSION. The repository key is trusted
+# only if its fingerprint matches. osslsigncode, which checks the installers'
+# signatures, is Debian 13's current build, like the image's other Debian
+# packages. The strip and the purge run in this same layer, so what they
+# remove doesn't stay behind in it.
 RUN <<'EOF'
 #!/bin/bash
 set -euo pipefail
@@ -64,9 +71,9 @@ echo "deb [arch=amd64,i386 signed-by=/etc/apt/keyrings/winehq-archive.gpg] https
 dpkg --add-architecture i386
 apt-get update
 apt-get install -y --no-install-recommends \
-  winehq-staging=11.19~trixie-1 wine-staging=11.19~trixie-1 \
-  wine-staging-amd64=11.19~trixie-1 wine-staging-i386:i386=11.19~trixie-1 \
-  osslsigncode=2.9-2
+  winehq-staging="$WINE_VERSION" wine-staging="$WINE_VERSION" \
+  wine-staging-amd64="$WINE_VERSION" wine-staging-i386:i386="$WINE_VERSION" \
+  osslsigncode
 apt-mark hold winehq-staging wine-staging wine-staging-amd64 wine-staging-i386
 
 if [ "$STRIP_WINE_DEBUG" = true ]; then
