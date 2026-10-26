@@ -9,10 +9,10 @@
 name: mt-dev
 
 services:
-  meta-trade-browser:
-    image: meta-trade-browser:dev
+  metatrader-docker:
+    image: metatrader-docker:dev
     build: .
-    container_name: meta-trade-browser-dev
+    container_name: metatrader-docker-dev
     restart: "no"                              # a test run doesn't come back after a reboot
     environment:
       TITLE: MetaTrader dev

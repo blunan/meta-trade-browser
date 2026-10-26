@@ -17,8 +17,9 @@ set -euo pipefail
 dir=/config/ssl
 cert="$dir/cert.pem"
 key="$dir/cert.key"
-own_subject='O=meta-trade-browser, CN=localhost'
-old_subject='O=mt-browser, CN=localhost'
+own_subject='O=metatrader-docker, CN=localhost'
+# What it was issued to under the project's earlier names, in a /config an older build made.
+old_subjects=('O=meta-trade-browser, CN=localhost' 'O=mt-browser, CN=localhost')
 base_subject='C=US, ST=CA, L=Carlsbad, O=Linuxserver.io, OU=LSIO Server, CN=*'
 renew_within=$((30 * 24 * 3600))
 
@@ -40,10 +41,13 @@ else
   issuer="$(openssl x509 -in "$cert" -noout -issuer 2> /dev/null || true)"
   if [[ "$subject" == "subject=$base_subject" ]]; then
     action=replaced
-  elif [[ ( "$subject" == "subject=$own_subject" && "$issuer" == "issuer=$own_subject" ) ||
-    ( "$subject" == "subject=$old_subject" && "$issuer" == "issuer=$old_subject" ) ]] &&
-    ! openssl x509 -in "$cert" -noout -checkend "$renew_within" > /dev/null; then
-    action=renewed
+  else
+    for own in "$own_subject" "${old_subjects[@]}"; do
+      if [[ "$subject" == "subject=$own" && "$issuer" == "issuer=$own" ]] &&
+        ! openssl x509 -in "$cert" -noout -checkend "$renew_within" > /dev/null; then
+        action=renewed
+      fi
+    done
   fi
 fi
 if [[ -z "$action" ]]; then
@@ -56,7 +60,7 @@ chown abc:abc "$dir"
 new="$(mktemp -d "$dir/.new.XXXXXX")"
 trap 'rm -rf "$new"' EXIT
 if ! openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -sha256 -noenc -days 825 \
-  -subj '/O=meta-trade-browser/CN=localhost' \
+  -subj '/O=metatrader-docker/CN=localhost' \
   -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1' \
   -addext 'basicConstraints=critical,CA:FALSE' \
   -addext 'keyUsage=critical,digitalSignature' \

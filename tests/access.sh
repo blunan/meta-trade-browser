@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Access-layer tests for the meta-trade-browser image, and T21: the window the desktop
+# Access-layer tests for the metatrader-docker image, and T21: the window the desktop
 # shows while MetaTrader can't start.
 #
 # Each configuration runs the image on an internal Docker network, which has
@@ -11,7 +11,7 @@
 # Usage: tests/access.sh [--host] [image]
 #   --host  also run T15, host networking on the host's 127.0.0.1:3911. It
 #           binds a port on this machine, so it runs only when asked.
-#   image   defaults to meta-trade-browser:dev.
+#   image   defaults to metatrader-docker:dev.
 set -euo pipefail
 
 host_test=no
@@ -19,7 +19,7 @@ if [[ "${1:-}" == --host ]]; then
   host_test=yes
   shift
 fi
-image="${1:-meta-trade-browser:dev}"
+image="${1:-metatrader-docker:dev}"
 
 run="mt-access-$$"
 net="$run-net"
@@ -374,7 +374,7 @@ if ready main; then
   check "T19: Selkies runs with sound, but without its own login, microphone, webcam, file transfers, or audio, video and file panels" \
     "SELKIES_AUDIO_ENABLED=true SELKIES_ENABLE_BASIC_AUTH=false SELKIES_FILE_TRANSFERS=none SELKIES_MICROPHONE_ENABLED=false|locked SELKIES_UI_SIDEBAR_SHOW_AUDIO_SETTINGS=false|locked SELKIES_UI_SIDEBAR_SHOW_FILES=false SELKIES_UI_SIDEBAR_SHOW_VIDEO_SETTINGS=false|locked SELKIES_WEBCAM_ENABLED=false|locked" \
     "$(selkies_env main '^SELKIES_((AUDIO|MICROPHONE|WEBCAM)_ENABLED|ENABLE_BASIC_AUTH|FILE_TRANSFERS|UI_SIDEBAR_SHOW_(AUDIO|VIDEO)_SETTINGS|UI_SIDEBAR_SHOW_FILES)=')"
-  check "T20: the container's own certificate is issued to" "subject=O=meta-trade-browser, CN=localhost" \
+  check "T20: the container's own certificate is issued to" "subject=O=metatrader-docker, CN=localhost" \
     "$(cert_field main -subject)"
   check "T20: ...for these names only" "DNS:localhost, IP Address:127.0.0.1, IP Address:0:0:0:0:0:0:0:1" \
     "$(cert_field main -ext subjectAltName)"
@@ -442,7 +442,7 @@ if ready main; then
     check "Restart: the login still works" 200 "$(code -u "$user:$password" "https://$t/")"
     check "Restart: the plain-text password left the startup environment again" no \
       "$(docker exec "$run-main" sh -c '[ -e /run/s6/container_environment/PASSWORD ] && echo yes || echo no')"
-    check "T20: the base's certificate is replaced at a start" "subject=O=meta-trade-browser, CN=localhost" \
+    check "T20: the base's certificate is replaced at a start" "subject=O=metatrader-docker, CN=localhost" \
       "$(cert_field main -subject)"
     check_true "T20: the log says so" logged main "[mt-cert] Replaced the base image's certificate"
   fi
@@ -485,7 +485,7 @@ if ready files; then
     "$(docker exec "$run-files" sh -c '[ -e /config/.wine/drive_c/Program ] && echo yes || echo no')"
   # The container's own certificate, 10 days from expiry.
   docker exec -u abc "$run-files" openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -noenc -days 10 \
-    -subj /O=meta-trade-browser/CN=localhost -out /config/ssl/cert.pem -keyout /config/ssl/cert.key > /dev/null 2>&1
+    -subj /O=metatrader-docker/CN=localhost -out /config/ssl/cert.pem -keyout /config/ssl/cert.key > /dev/null 2>&1
   docker restart "$run-files" > /dev/null
   if ready files; then
     check "T20: a start in its last 30 days renews it" 825 "$(cert_days files)"

@@ -1,9 +1,9 @@
-# meta-trade-browser: MetaTrader in your browser, one container for one trading account.
+# metatrader-docker: MetaTrader in your browser, one container for one trading account.
 # The quick start creates the folders and the password file first.
 services:
-  meta-trade-browser:
-    image: ghcr.io/blunan/meta-trade-browser:latest    # or a date tag such as :20261019.1, to stay on one build
-    container_name: meta-trade-browser
+  metatrader-docker:
+    image: ghcr.io/blunan/metatrader-docker:latest    # or a date tag such as :20261019.1, to stay on one build
+    container_name: metatrader-docker
     restart: unless-stopped
     stop_grace_period: 30s                     # time for MetaTrader to save its charts and settings
     # Never add init: true: the image's own supervisor has to be process 1.

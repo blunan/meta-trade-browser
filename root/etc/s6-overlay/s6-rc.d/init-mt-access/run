@@ -232,7 +232,8 @@ if [[ "$cert_public" != "$key_public" ]]; then
 fi
 if [[ -z "${cert_source:-}" ]]; then
   cert_ids="$(openssl x509 -in "$cert" -noout -subject -issuer)"
-  if [[ "$cert_ids" == $'subject=O=meta-trade-browser, CN=localhost\nissuer=O=meta-trade-browser, CN=localhost' ||
+  if [[ "$cert_ids" == $'subject=O=metatrader-docker, CN=localhost\nissuer=O=metatrader-docker, CN=localhost' ||
+    "$cert_ids" == $'subject=O=meta-trade-browser, CN=localhost\nissuer=O=meta-trade-browser, CN=localhost' ||
     "$cert_ids" == $'subject=O=mt-browser, CN=localhost\nissuer=O=mt-browser, CN=localhost' ]]; then
     cert_source="the container's own, in /config/ssl"
   else

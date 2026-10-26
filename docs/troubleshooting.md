@@ -2,7 +2,7 @@
 
 ## Where the logs are
 
-- **`docker logs meta-trade-browser`** (or `docker compose logs`) has everything:
+- **`docker logs metatrader-docker`** (or `docker compose logs`) has everything:
     - the certificate, as an `[mt-cert]` line when it's made or renewed;
     - the startup check, as `[mt-access]` lines;
     - the install and every MetaTrader start, as `[mt]` lines;

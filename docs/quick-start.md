@@ -7,7 +7,7 @@ You need a Linux server with Docker Engine on amd64 (x86-64), about 4 GB of memo
 On the server:
 
 ```sh
-mkdir -p meta-trade-browser && cd meta-trade-browser
+mkdir -p metatrader-docker && cd metatrader-docker
 mkdir -p -m 700 data secrets
 mkdir -p ea
 ```
@@ -34,7 +34,7 @@ From then on, `sudo cat secrets/password` shows the password.
 
 ## 3. Save `compose.yaml`
 
-Save this as `compose.yaml` in the same folder. It's also [in the repository](https://github.com/blunan/meta-trade-browser/blob/main/compose.yaml). Without Compose, skip this step: the next one has the same container as a `docker run` command.
+Save this as `compose.yaml` in the same folder. It's also [in the repository](https://github.com/blunan/metatrader-docker/blob/main/compose.yaml). Without Compose, skip this step: the next one has the same container as a `docker run` command.
 
 ```yaml
 --8<-- "compose.yaml"
@@ -57,7 +57,7 @@ Start it and follow its log:
 === "docker run"
 
     ```sh
-    docker run -d --name meta-trade-browser \
+    docker run -d --name metatrader-docker \
       --restart unless-stopped --stop-timeout 30 \
       --security-opt no-new-privileges:true \
       --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER \
@@ -68,8 +68,8 @@ Start it and follow its log:
       -v "$PWD/data:/config" \
       -v "$PWD/ea:/mql5" \
       -p 127.0.0.1:3001:3001 \
-      ghcr.io/blunan/meta-trade-browser:latest
-    docker logs -f meta-trade-browser
+      ghcr.io/blunan/metatrader-docker:latest
+    docker logs -f metatrader-docker
     ```
 
 The first start installs Microsoft Edge WebView2 and MetaTrader. It takes about 2–3 minutes, and it's done when the log says `starting MetaTrader`. Ctrl+C stops following the log; the container keeps running.

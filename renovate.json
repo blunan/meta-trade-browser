@@ -11,7 +11,7 @@
   "automerge": false,
   "platformAutomerge": false,
   "ignorePaths": ["docs/requirements.in", "docs/requirements.txt"],
-  "ignoreDeps": ["ghcr.io/blunan/meta-trade-browser"],
+  "ignoreDeps": ["ghcr.io/blunan/metatrader-docker"],
   "packageRules": [
     {
       "description": "GHCR gives image digests no release date, so the base image's updates can't wait 14 days: review and the PR's Image tests are the gate.",

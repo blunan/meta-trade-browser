@@ -25,8 +25,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  IMAGE: ghcr.io/blunan/meta-trade-browser
-  IDENTITY: https://github.com/blunan/meta-trade-browser/.github/workflows/image.yml@refs/heads/main
+  IMAGE: ghcr.io/blunan/metatrader-docker
+  IDENTITY: https://github.com/blunan/metatrader-docker/.github/workflows/image.yml@refs/heads/main
   ISSUER: https://token.actions.githubusercontent.com
   # renovate: datasource=github-releases depName=sigstore/cosign
   COSIGN_VERSION: v3.1.3
@@ -105,7 +105,7 @@ jobs:
         with:
           context: .
           load: true
-          tags: meta-trade-browser:ci
+          tags: metatrader-docker:ci
           provenance: false
           sbom: false
           cache-from: type=gha
@@ -119,13 +119,13 @@ jobs:
         id: layers
         if: steps.changes.outputs.image == 'true'
         run: |
-          layers="$(docker image inspect meta-trade-browser:ci --format '{{json .RootFS.Layers}}' | jq -c .)"
+          layers="$(docker image inspect metatrader-docker:ci --format '{{json .RootFS.Layers}}' | jq -c .)"
           jq -r '.[]' <<< "$layers"
           echo "layers=$layers" >> "$GITHUB_OUTPUT"
 
       - name: Access tests (T1–T21)
         if: steps.changes.outputs.image == 'true'
-        run: tests/access.sh --host meta-trade-browser:ci
+        run: tests/access.sh --host metatrader-docker:ci
 
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         if: steps.changes.outputs.image == 'true'
@@ -165,7 +165,7 @@ jobs:
         if: steps.changes.outputs.image == 'true'
         run: |
           trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed \
-            --scanners vuln,secret --ignorefile .trivyignore.yaml meta-trade-browser:ci
+            --scanners vuln,secret --ignorefile .trivyignore.yaml metatrader-docker:ci
 
   publish:
     name: Publish
