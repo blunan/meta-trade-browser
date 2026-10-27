@@ -9,6 +9,7 @@
 ![MetaTrader 5](https://img.shields.io/badge/MetaTrader-5-4A76B8)
 ![Wine staging](https://img.shields.io/badge/Wine-staging-800000?logo=wine&logoColor=white)
 ![Debian 13 trixie](https://img.shields.io/badge/Debian-13%20trixie-A81D33?logo=debian&logoColor=white)
+![Python 3.14](https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white)
 
 **MetaTrader in your browser.** The MetaTrader terminal and MetaEditor run on a small Linux desktop inside a container, and you use them from any browser as you would on your own computer: charts, Expert Advisors (EAs, the MQL5 programs that trade from a chart), MetaEditor and the Strategy Tester. One container runs one trading account.
 
