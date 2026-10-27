@@ -3,9 +3,9 @@
 #
 # Checks an installer's Authenticode signature before it runs. It passes only
 # when osslsigncode verifies the primary signature, timestamp and revocation
-# lists included, and the signer's organisation is exactly MetaQuotes Ltd,
-# Microsoft Corporation or Python Software Foundation. Exit code 0: passed; 1:
-# refused; 2: wrong usage.
+# lists included, and the signer's certificate names its organisation as
+# exactly MetaQuotes Ltd, Microsoft Corporation or Python Software Foundation.
+# Exit code 0: passed; 1: refused; 2: wrong usage.
 #   metaquotes  mt5setup.exe, against Debian's CA bundle. osslsigncode fetches
 #               DigiCert's revocation lists itself.
 #   microsoft   the WebView2 installer, against the two Microsoft roots pinned
@@ -38,6 +38,20 @@ file="$2"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
+
+# signature_certs: the certificates the file's signature carries, as
+# $tmp/sig.pem and one per file in $tmp/cert-<n>.pem. Fails if the file has no
+# signature.
+certs_split=no
+signature_certs() {
+  if [[ "$certs_split" == no ]]; then
+    osslsigncode extract-signature -pem -in "$file" -out "$tmp/sig.pem" > /dev/null 2>&1 || return 1
+    openssl pkcs7 -in "$tmp/sig.pem" -print_certs 2> /dev/null |
+      awk -v d="$tmp" '/-----BEGIN CERTIFICATE-----/ { n++ } n { print > (d "/cert-" n ".pem") }' ||
+      return 1
+    certs_split=yes
+  fi
+}
 
 log "$(basename "$file"): $(stat -c %s "$file") bytes, SHA-256 $(sha256sum "$file" | cut -d' ' -f1)"
 
@@ -72,10 +86,12 @@ else
     # changes from release to release (EOC CA 03 for 3.14.9, EOC CA 04 for
     # 3.14.10; there are AOC ones too). The signer's certificate names its CA's
     # list. The timestamp's comes through Public RSA Timestamping CA 2020.
-    issuer_crl="$(osslsigncode extract-signature -pem -in "$file" -out "$tmp/sig.pem" > /dev/null 2>&1 &&
-      openssl pkcs7 -in "$tmp/sig.pem" -print_certs -text -noout 2> /dev/null |
-      sed -n -E "s|^ *URI:$microsoft_crls/(Microsoft%20ID%20Verified%20CS%20[A-Z]{3}%20CA%20[0-9]{2}\\.crl)\$|\1|p" |
-      head -n 1)" || true
+    issuer_crl=
+    if signature_certs; then
+      issuer_crl="$(openssl pkcs7 -in "$tmp/sig.pem" -print_certs -text -noout 2> /dev/null |
+        sed -n -E "s|^ *URI:$microsoft_crls/(Microsoft%20ID%20Verified%20CS%20[A-Z]{3}%20CA%20[0-9]{2}\\.crl)\$|\1|p" |
+        head -n 1)" || true
+    fi
     if [[ -z "$issuer_crl" ]]; then
       refuse "has no signature through Microsoft's ID Verified code signing, which signs Python's installers."
     fi
@@ -123,13 +139,30 @@ if (( rc != 0 )) || ! grep -q -x 'Signature verification: ok' <<< "$report"; the
   done <<< "$report"
   refuse "failed its signature check (osslsigncode exit code $rc)."
 fi
-# A whole field, so that "O=MetaQuotes Ltd2" doesn't pass.
-IFS=/ read -r -a fields <<< "$signer"
-signed_by=no
-for field in "${fields[@]}"; do
-  [[ "$field" == "O=$organisation" ]] && signed_by=yes
-done
-if [[ "$signed_by" != yes ]]; then
+# The organisation comes from the signer's certificate itself, one field per
+# line: in osslsigncode's one-line subject, a "/" inside a value would look like
+# the start of another field. The signer is the certificate with the serial
+# number osslsigncode reports for it, and every certificate in the signature
+# with that number must name the organisation, exactly: "MetaQuotes Ltd2"
+# doesn't pass.
+serial="$(awk '/^Signer.s certificate:/ { s = 1 } s && /Serial *:/ { sub(/^[ \t]*Serial *: */, ""); print; exit }' <<< "$report")"
+matches=0
+if [[ -n "$serial" ]] && signature_certs; then
+  for cert in "$tmp"/cert-*.pem; do
+    [[ -f "$cert" && "$(openssl x509 -in "$cert" -noout -serial 2> /dev/null)" == "serial=$serial" ]] || continue
+    if openssl x509 -in "$cert" -noout -subject -nameopt multiline 2> /dev/null |
+      ORGANISATION="$organisation" awk '
+        { i = index($0, " = "); name = substr($0, 1, i - 1); gsub(/^ +| +$/, "", name) }
+        i && name == "organizationName" && substr($0, i + 3) == ENVIRON["ORGANISATION"] { found = 1 }
+        END { exit !found }'; then
+      matches=$((matches + 1))
+    else
+      matches=0
+      break
+    fi
+  done
+fi
+if (( matches == 0 )); then
   refuse "has a valid signature, but not from $organisation: $signer"
 fi
 log "signature ok: signed by $signer, through ${issuer##*/CN=}, timestamp ${timestamp:-none}"

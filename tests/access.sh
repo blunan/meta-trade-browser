@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Access-layer tests for the metatrader-docker image, T21: the window the desktop
 # shows while MetaTrader can't start, and the installers' signature check
-# refusing an unsigned file.
+# refusing an unsigned file or a signer that only writes the organisation into
+# another field of its name.
 #
 # Each configuration runs the image on an internal Docker network, which has
 # no internet: MetaTrader's first-start downloads fail at once, and the access layer
@@ -327,6 +328,35 @@ check_true "Signature check: ...because it isn't signed through Microsoft's ID V
 rc=0
 docker exec "$run-probe" /opt/mt/verify-signature.sh pip /etc/hostname > /dev/null 2>&1 || rc=$?
 check "Signature check: an unknown kind is a usage error" 2 "$rc"
+# The organisation comes from the signer's certificate, not from text in another
+# field of its name. In a container of its own, a test CA joins Debian's CA
+# bundle and signs a Wine program twice: as MetaQuotes Ltd, and as Spoof Ltd
+# with "Spoof/O=MetaQuotes Ltd" as its common name. Neither certificate names a
+# revocation list, so this works offline.
+out="$(docker run --rm --network none --memory 256m --cap-drop ALL --security-opt no-new-privileges:true \
+  --entrypoint bash "$image" -c '
+    set -euo pipefail
+    cd "$(mktemp -d)"
+    exe=/opt/wine-staging/lib/wine/x86_64-windows/hostname.exe
+    openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=mt-access test CA" \
+      -addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign,cRLSign \
+      -keyout ca.key -out ca.pem 2> /dev/null
+    cat ca.pem >> /etc/ssl/certs/ca-certificates.crt
+    printf "basicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=codeSigning\n" > leaf.ext
+    for signer in "real:/O=MetaQuotes Ltd/CN=MetaQuotes Ltd" "spoofed:/O=Spoof Ltd/CN=Spoof\/O=MetaQuotes Ltd"; do
+      name="${signer%%:*}"
+      openssl req -newkey rsa:2048 -nodes -subj "${signer#*:}" -keyout "$name.key" -out "$name.csr" 2> /dev/null
+      openssl x509 -req -in "$name.csr" -CA ca.pem -CAkey ca.key -CAcreateserial -days 1 \
+        -extfile leaf.ext -out "$name.pem" 2> /dev/null
+      osslsigncode sign -certs "$name.pem" -key "$name.key" -h sha256 -in "$exe" -out "$name.exe" > /dev/null
+      rc=0
+      /opt/mt/verify-signature.sh metaquotes "$name.exe" || rc=$?
+      echo "$name exit $rc"
+    done' 2>&1)" || true
+check_true "Signature check: a test CA's MetaQuotes Ltd passes, offline" grep -qx "real exit 0" <<< "$out"
+check_true "Signature check: \"Spoof/O=MetaQuotes Ltd\" as the common name is refused" grep -qx "spoofed exit 1" <<< "$out"
+check_true "Signature check: ...because the signer's organisation is Spoof Ltd" grep -qF \
+  "REFUSED: spoofed.exe has a valid signature, but not from MetaQuotes Ltd" <<< "$out"
 
 echo "Defaults (T2, T3, T5-T8, T13, T14, T16, T17, T19-T21)"
 start "$net" main "${with_password[@]}"

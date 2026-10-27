@@ -37,7 +37,7 @@ What needs files, such as your EAs or a certificate of your own, needs no enviro
 | `TZ` | UTC | The desktop's time zone. MetaTrader shows its server's time anyway. |
 | `SELKIES_CLIPBOARD_ENABLED` | `true` | The shared clipboard: `true`, `in` (browser to desktop only), `out` (desktop to browser only) or `false`. |
 | `SELKIES_FILE_TRANSFERS` | `false` | `true` turns on file transfers through the browser, and the side panel's file panel with them. `upload` or `download` allows one direction only. Uploads land in the [EA folder](#the-ea-folder-mql5)'s `Experts` when it's mounted and writable, and appear in the Navigator under *Expert Advisors → Mounted* after *Refresh*. Otherwise they land in MetaTrader's own `MQL5/Experts`, in `/config`, and appear under *Expert Advisors*. The file panel offers downloads from the same folder, and can't choose another. |
-| `MT_PYTHON` | off | `true` installs Windows Python and MetaQuotes' `MetaTrader5` package into `/config` at the next start, once the Python Software Foundation's signature passes. MetaTrader and MetaEditor find it by themselves (see [Python](using.md#python)). |
+| `MT_PYTHON` | off | `true` installs Windows Python and MetaQuotes' `MetaTrader5` package into `/config` at the next start, once the Python Software Foundation's signature passes and the packages' hashes match the image's list. MetaTrader and MetaEditor find it by themselves (see [Python](using.md#python)). |
 | `MT_AI_AGENTS` | off | `true` turns on MetaTrader's and MetaEditor's servers for AI agents (see [MetaTrader's AI-agent servers](verify.md#metatraders-ai-agent-servers)). |
 
 ## Reverse proxy, VPN and host networking

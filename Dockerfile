@@ -186,6 +186,9 @@ pinned() {
     echo "$pem holds more than certificates" >&2
     exit 1
   fi
+  # One block per certificate: a block openssl can't read would drop out of
+  # the fingerprints below, unnoticed.
+  test "$(grep -c -- '-----BEGIN CERTIFICATE-----' "$pem")" -eq $#
   tmp="$(mktemp -d)"
   awk -v d="$tmp" '/-----BEGIN CERTIFICATE-----/ { n++ } n { print > (d "/" n ".pem") }' "$pem"
   actual="$(for f in "$tmp"/*.pem; do openssl x509 -in "$f" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d :; done | sort)"

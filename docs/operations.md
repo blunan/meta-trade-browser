@@ -30,7 +30,7 @@ From mildest to strongest:
     - `sha-<commit>` names the first build of that source commit.
 - **New builds** come with every change to the image, including updates of the base image it's built on, which also bring Debian's fixes.
 - **Going back:** use the previous date tag in place of `latest`, the same way.
-- **Python,** with `MT_PYTHON=true` (see [Python](using.md#python)): a new image that brings a newer Python 3.14 release upgrades Python and `MetaTrader5` at its first start. Going back to an older image keeps the newer Python.
+- **Python,** with `MT_PYTHON=true` (see [Python](using.md#python)): a new image that brings a newer Python 3.14 release, or newer packages, upgrades them at its first start. Going back to an older image keeps the newer Python, and puts back that image's packages.
 
 To update:
 

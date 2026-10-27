@@ -11,10 +11,12 @@
 #   2. Microsoft Edge WebView2, which MetaTrader's HTML panes use, once Microsoft's
 #      signature passes (.webview2-installed);
 #   3. MetaTrader, once MetaQuotes' signature passes (.mt5-installed);
-#   4. when MT_PYTHON=true, Windows Python and the MetaTrader5 package, once the
-#      Python Software Foundation's signature passes. .python-installed holds
-#      python_version: an image with a newer one upgrades it in place, and an
-#      older image leaves it alone.
+#   4. when MT_PYTHON=true, Windows Python, once the Python Software Foundation's
+#      signature passes and it reports python_version (.python-installed: an
+#      image with a newer one upgrades it in place, and an older image leaves it
+#      alone). Then the MetaTrader5 package and numpy, the versions in
+#      python-requirements.txt, once their hashes match (.python-packages holds
+#      that file's SHA-256: an image with another list installs its versions).
 # A failed step is retried 60 s later, and MetaTrader doesn't start before every
 # step is done. Otherwise MetaEditor would install WebView2 by itself, unchecked.
 # .installing marks this first install while it's under way, and Python waits
@@ -45,6 +47,9 @@ webview2_dir="$WINEPREFIX/drive_c/Program Files (x86)/Microsoft/EdgeWebView/Appl
 python_version=3.14.10
 python_series="${python_version%.*}"
 python_dir="$WINEPREFIX/drive_c/Program Files/Python${python_series//./}"
+# The MetaTrader5 package and numpy, pinned with their hashes. Renovate keeps
+# the list current.
+python_requirements=/opt/mt/python-requirements.txt
 mt_url=https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe
 # The URL MetaQuotes' own Linux installer, mt5linux.sh, uses.
 webview2_url=https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/f2910a1e-e5a6-4f17-b52d-7faf525d17f8/MicrosoftEdgeWebview2Setup.exe
@@ -162,15 +167,29 @@ webview2_version() {
   basename "$(dirname "${exes[0]}")"
 }
 
-# python_ready: succeeds unless MT_PYTHON=true needs Python installed, or upgraded
-# to this image's newer one. A newer one, from an image you went back from,
-# stays: its installer doesn't downgrade.
-python_ready() {
+# python_current: succeeds when Python is installed, at this image's version or
+# a newer one. A newer one, from an image you went back from, stays: its
+# installer doesn't downgrade.
+python_current() {
   local installed
-  [[ "${MT_PYTHON:-}" == true ]] || return 0
   installed="$(cat "$WINEPREFIX/.python-installed" 2> /dev/null || true)"
   [[ -n "$installed" ]] &&
     [[ "$(printf '%s\n' "$python_version" "$installed" | sort -V | tail -n 1)" == "$installed" ]]
+}
+
+# packages_current: succeeds when the packages are the ones in this image's
+# python-requirements.txt.
+packages_current() {
+  local installed
+  installed="$(cat "$WINEPREFIX/.python-packages" 2> /dev/null || true)"
+  [[ -n "$installed" && "$installed" == "$(sha256sum < "$python_requirements" | cut -d' ' -f1)" ]]
+}
+
+# python_ready: succeeds unless MT_PYTHON=true needs Python or its packages
+# installed, or brought up to this image's.
+python_ready() {
+  [[ "${MT_PYTHON:-}" == true ]] || return 0
+  python_current && packages_current
 }
 
 # python_failed <reason>: during the first install, the same as fail. Otherwise
@@ -252,31 +271,46 @@ install_mt() {
   log "step 3 of $steps done in $((SECONDS - started)) s"
 }
 
-# install_python: fails, after python_failed, if Python couldn't be installed.
+# install_python: fails, after python_failed, if Python or its packages couldn't
+# be installed. Python itself is installed only when it isn't current.
 install_python() {
-  local started=$SECONDS setup="$tmp/python-$python_version-amd64.exe" versions
-  log "step 4 of $steps: Python $python_version and the MetaTrader5 package (MT_PYTHON=true)"
-  notice install "Step 4 of $steps: downloading Python $python_version"
-  download "$python_url" "$setup" || { python_failed "the Python download failed"; return 1; }
-  notice install "Step 4 of $steps: checking the Python Software Foundation's signature"
-  /opt/mt/verify-signature.sh python "$setup" ||
-    { python_failed "the Python installer didn't pass its signature check, so it wasn't run"; return 1; }
-  log "installing Python $python_version"
-  notice install "Step 4 of $steps: installing Python $python_version"
-  timeout 900 wine "$setup" /quiet InstallAllUsers=1 PrependPath=1 \
-    Include_launcher=0 Include_test=0 Include_doc=0 Include_tcltk=0 ||
-    { python_failed "the Python installer failed"; return 1; }
-  [[ -f "$python_dir/python.exe" ]] ||
-    { python_failed "the Python install is incomplete: python.exe is missing"; return 1; }
+  local started=$SECONDS setup="$tmp/python-$python_version-amd64.exe" installed versions
+  if python_current; then
+    log "step 4 of $steps: the MetaTrader5 package (MT_PYTHON=true)"
+  else
+    log "step 4 of $steps: Python $python_version and the MetaTrader5 package (MT_PYTHON=true)"
+    notice install "Step 4 of $steps: downloading Python $python_version"
+    download "$python_url" "$setup" || { python_failed "the Python download failed"; return 1; }
+    notice install "Step 4 of $steps: checking the Python Software Foundation's signature"
+    /opt/mt/verify-signature.sh python "$setup" ||
+      { python_failed "the Python installer didn't pass its signature check, so it wasn't run"; return 1; }
+    log "installing Python $python_version"
+    notice install "Step 4 of $steps: installing Python $python_version"
+    timeout 900 wine "$setup" /quiet InstallAllUsers=1 PrependPath=1 \
+      Include_launcher=0 Include_test=0 Include_doc=0 Include_tcltk=0 ||
+      { python_failed "the Python installer failed"; return 1; }
+    [[ -f "$python_dir/python.exe" ]] ||
+      { python_failed "the Python install is incomplete: python.exe is missing"; return 1; }
+    # Any installer the Python Software Foundation signed passes the check, an
+    # older 3.14 too, so Python must also be the version this image asks for.
+    installed="$(wine "$python_dir/python.exe" -I -c 'import platform; print(platform.python_version())' |
+      tr -d '\r')" || { python_failed "Python's version couldn't be read"; return 1; }
+    [[ "$installed" == "$python_version" ]] ||
+      { python_failed "the Python installer left Python $installed, not $python_version"; return 1; }
+    printf '%s\n' "$python_version" > "$WINEPREFIX/.python-installed"
+  fi
   log "installing the MetaTrader5 package"
   notice install "Step 4 of $steps: installing the MetaTrader5 package"
-  timeout 900 wine "$python_dir/python.exe" -m pip install --no-cache-dir \
-    --disable-pip-version-check --no-warn-script-location --upgrade --only-binary=:all: MetaTrader5 ||
+  # Only the versions in python-requirements.txt, and only files with a hash
+  # listed there. Z: is Wine's drive for /.
+  timeout 900 wine "$python_dir/python.exe" -I -m pip install --no-cache-dir \
+    --disable-pip-version-check --no-warn-script-location --require-hashes --only-binary=:all: \
+    --no-deps -r "Z:$python_requirements" ||
     { python_failed "the MetaTrader5 package couldn't be installed"; return 1; }
   versions="$(wine "$python_dir/python.exe" -I -c \
     'import platform, MetaTrader5, numpy; print(f"Python {platform.python_version()}, MetaTrader5 {MetaTrader5.__version__}, numpy {numpy.__version__}")' \
     | tr -d '\r')" || { python_failed "the MetaTrader5 package couldn't be imported"; return 1; }
-  printf '%s\n' "$python_version" > "$WINEPREFIX/.python-installed"
+  sha256sum < "$python_requirements" | cut -d' ' -f1 > "$WINEPREFIX/.python-packages"
   log "step 4 of $steps done in $((SECONDS - started)) s: $versions"
 }
 
