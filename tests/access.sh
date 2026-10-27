@@ -85,6 +85,14 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=mt-access-test \
   -keyout "$tmp/tls.key" -out "$tmp/tls.crt" 2> /dev/null
 openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out "$tmp/other.key" 2> /dev/null
 own_cert=(-v "$tmp/tls.crt:/config/ssl/cert.pem:ro" -v "$tmp/tls.key:/config/ssl/cert.key:ro")
+# Docker 29.4.2's seccomp profile refused socketcall, the call 32-bit programs
+# open sockets with, with ENOSYS (38). Wine's 32-bit programs need it. This
+# profile refuses that call and nothing else.
+cat > "$tmp/no-socketcall.json" << 'EOF'
+{"defaultAction": "SCMP_ACT_ALLOW",
+ "architectures": ["SCMP_ARCH_X86_64", "SCMP_ARCH_X86", "SCMP_ARCH_X32"],
+ "syscalls": [{"names": ["socketcall"], "action": "SCMP_ACT_ERRNO", "errnoRet": 38}]}
+EOF
 
 # start <network> <name> [docker run options...]
 start() {
@@ -196,6 +204,24 @@ logged() {
   local logs
   logs="$(docker logs "$run-$1" 2>&1)"
   grep -qF -- "$2" <<< "$logs"
+}
+
+# until_logged <name> <text>: waits up to 120 s for the text in the container's
+# log; succeeds if it came.
+until_logged() {
+  local _
+  for _ in $(seq 1 120); do
+    logged "$1" "$2" && return 0
+    sleep 1
+  done
+  return 1
+}
+
+# dump_log <name>: run-terminal.sh's log, with Wine's own errors, which docker
+# logs mixes with the other services' lines.
+dump_log() {
+  echo "  run-terminal.log:"
+  docker exec "$run-$1" cat /config/log/mt/run-terminal.log 2>&1 | sed 's/^/    /' || true
 }
 
 # listeners <name>: the container's listening TCP and UDP sockets, as
@@ -460,20 +486,14 @@ if ready main; then
     pass "Q5: health checks aren't logged"
   fi
   # Offline, the first start fails at step 2, and the window says why.
-  for _ in $(seq 1 120); do
-    logged main "Retrying in 60 s" && break
-    sleep 1
-  done
+  until_logged main "Retrying in 60 s" || true
   failures_before=$failures
   check_true "MT_PYTHON unset: three install steps" logged main "step 2 of 3: Microsoft Edge WebView2"
   check_true "MT_PYTHON unset: the log says Python: off" logged main "Python: off."
   check "the first install is marked as under way" yes \
     "$(docker exec "$run-main" sh -c '[ -f /config/.wine/.installing ] && echo yes || echo no')"
-  # run-terminal.sh's log, with Wine's own errors, which docker logs mixes
-  # with the other services' lines.
   if (( failures > failures_before )); then
-    echo "  run-terminal.log:"
-    docker exec "$run-main" cat /config/log/mt/run-terminal.log 2>&1 | sed 's/^/    /' || true
+    dump_log main
   fi
   check "T21: the startup window: one, framed like MetaTrader's windows, not filling the screen, centred" \
     "1 framed small centred" "$(notice_window main)"
@@ -688,6 +708,17 @@ if ready sub; then
   check_true "SELKIES_COMMAND_ENABLED=true is warned about" logged sub "WARNING: SELKIES_COMMAND_ENABLED=true"
 fi
 docker rm -f "$run-sub" > /dev/null
+
+echo "A seccomp profile that blocks socketcall, as Docker 29.4.2's does"
+start "$net" seccomp --security-opt "seccomp=$tmp/no-socketcall.json" "${with_password[@]}"
+until_logged seccomp "Retrying in 60 s" || true
+failures_before=$failures
+check_true "Seccomp: the first install says Docker 29.4.2's profile stops it" \
+  logged seccomp "as Docker 29.4.2's does"
+if (( failures > failures_before )); then
+  dump_log seccomp
+fi
+docker rm -f "$run-seccomp" > /dev/null
 
 if [[ "$host_test" == yes ]]; then
   echo "Host networking (T15), on this machine's 127.0.0.1:3911"

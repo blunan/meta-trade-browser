@@ -207,14 +207,24 @@ python_failed() {
 }
 
 prepare_prefix() {
-  local started=$SECONDS
+  local started=$SECONDS offset
   notice install "Step 1 of $steps: setting up Wine"
   if [[ -f "$WINEPREFIX/.mt5-installed" ]]; then
     # From an earlier version of this image, which marked only the MetaTrader install.
     log "step 1 of $steps: the Wine prefix already holds MetaTrader; keeping it as it is"
   else
     log "step 1 of $steps: creating the Wine prefix"
-    wineboot -i || fail "the Wine prefix couldn't be created"
+    offset="$(stat -c %s "$log_file")"
+    if ! wineboot -i; then
+      # Docker 29.4.2's seccomp profile refuses socketcall, the call 32-bit
+      # programs open sockets with, so Wine's 32-bit programs can't reach
+      # wineserver, and Wine says so in this log. Only what wineboot just wrote
+      # counts: an older line stays in the log after Docker is updated.
+      if grep -qF 'socket : Function not implemented' < <(tail -c "+$((offset + 1))" "$log_file"); then
+        fail "the Wine prefix couldn't be created: the container's seccomp profile blocks socketcall, a system call Wine's 32-bit programs need, as Docker 29.4.2's does. Update Docker to 29.4.3 or later"
+      fi
+      fail "the Wine prefix couldn't be created"
+    fi
     touch "$WINEPREFIX/.installing"
     # A crash ends the program, and the watchdog restarts it, instead of
     # leaving a dialog that waits for a click.

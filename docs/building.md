@@ -11,7 +11,7 @@ tests/access.sh
 
 - `docker build --build-arg STRIP_WINE_DEBUG=false` keeps Wine's debug information, for crash backtraces with function names; the image grows by about 1 GB.
 - `docker build --build-arg WINE_VERSION=<version>` installs another WineHQ staging release than the pinned one, for example to try a newer one. Versions look like `11.20~trixie-1`.
-- `tests/access.sh` checks the access layer: logins, refusals, origins, headers, certificates, listening ports, and that the installers' signature check refuses an unsigned file, or a signer named `O=Spoof Ltd` that writes `O=MetaQuotes Ltd` into its common name. It needs no internet and leaves nothing behind. `--host` adds the host-networking test, which binds `127.0.0.1:3911` on the machine.
+- `tests/access.sh` checks the access layer: logins, refusals, origins, headers, certificates, listening ports, and that the installers' signature check refuses an unsigned file, or a signer named `O=Spoof Ltd` that writes `O=MetaQuotes Ltd` into its common name. It also checks that a seccomp profile like Docker 29.4.2's, which refuses `socketcall`, stops the first install with a message that names the cause. It needs no internet and leaves nothing behind. `--host` adds the host-networking test, which binds `127.0.0.1:3911` on the machine.
 - `tests/compose.dev.yaml` runs a local build with the example's settings, with its own container name, port (3201), folders and password, next to a real deployment:
 
     ```sh
