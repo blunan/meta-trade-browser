@@ -171,24 +171,35 @@ COPY root/ /
 RUN /usr/bin/python3 -I -c 'import gi; gi.require_version("Gtk", "3.0"); from gi.repository import Gtk' && \
     /usr/bin/python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' /opt/mt/notice.py
 
-# The WebView2 installer is verified against exactly these two Microsoft roots:
-# Root Certificate Authority 2011 (code signing) and 2010 (timestamps).
+# Each Microsoft-signed installer is verified against its own pinned roots, and
+# no others: WebView2's against Root Certificate Authority 2011 (code signing)
+# and 2010 (timestamps), Python's against Identity Verification Root
+# Certificate Authority 2020 (both).
 RUN <<'EOF'
 #!/bin/bash
 set -euo pipefail
-pem=/opt/mt/certs/microsoft-roots.pem
-expected='847DF6A78497943F27FC72EB93F9A637320A02B561D0A91B09E87A7807ED7C61
-DF545BF919A2439C36983B54CDFC903DFA4F37D3996D8D84B4C31EEC6F3C163E'
-if grep -v -E '^(-----(BEGIN|END) CERTIFICATE-----|[A-Za-z0-9+/=]+)$' "$pem"; then
-  echo "$pem holds more than certificates" >&2
-  exit 1
-fi
-test "$(grep -c -- '-----BEGIN CERTIFICATE-----' "$pem")" -eq 2
-tmp="$(mktemp -d)"
-awk -v d="$tmp" '/-----BEGIN CERTIFICATE-----/ { n++ } n { print > (d "/" n ".pem") }' "$pem"
-actual="$(for f in "$tmp"/*.pem; do openssl x509 -in "$f" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d :; done | sort)"
-rm -rf "$tmp"
-test "$actual" = "$(sort <<< "$expected")"
+# pinned <file> <SHA-256>...: the file holds exactly these certificates.
+pinned() {
+  local pem="$1" tmp actual
+  shift
+  if grep -v -E '^(-----(BEGIN|END) CERTIFICATE-----|[A-Za-z0-9+/=]+)$' "$pem"; then
+    echo "$pem holds more than certificates" >&2
+    exit 1
+  fi
+  # One block per certificate: a block openssl can't read would drop out of
+  # the fingerprints below, unnoticed.
+  test "$(grep -c -- '-----BEGIN CERTIFICATE-----' "$pem")" -eq $#
+  tmp="$(mktemp -d)"
+  awk -v d="$tmp" '/-----BEGIN CERTIFICATE-----/ { n++ } n { print > (d "/" n ".pem") }' "$pem"
+  actual="$(for f in "$tmp"/*.pem; do openssl x509 -in "$f" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d :; done | sort)"
+  rm -rf "$tmp"
+  test "$actual" = "$(printf '%s\n' "$@" | sort)"
+}
+pinned /opt/mt/certs/microsoft-roots.pem \
+  847DF6A78497943F27FC72EB93F9A637320A02B561D0A91B09E87A7807ED7C61 \
+  DF545BF919A2439C36983B54CDFC903DFA4F37D3996D8D84B4C31EEC6F3C163E
+pinned /opt/mt/certs/microsoft-identity-root.pem \
+  5367F20C7ADE0E2BCA790915056D086B720C33C1FA2A2661ACF787E3292E1270
 EOF
 
 # The labels and their values come last: every RUN after an ARG sees that
@@ -214,7 +225,7 @@ LABEL org.opencontainers.image.title="metatrader-docker" \
       maintainer="Brayan Luna"
 
 # Healthy while MetaTrader runs and the desktop answers. The first start installs for
-# about 2 minutes, which the start period covers.
+# about 2 minutes (3 with MT_PYTHON=true), which the start period covers.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5m --retries=3 \
   CMD ["/opt/mt/healthcheck.sh"]
 

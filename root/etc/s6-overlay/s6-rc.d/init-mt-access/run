@@ -410,6 +410,13 @@ if [[ "${MT_AI_AGENTS:-}" == true ]]; then
 else
   agents="off"
 fi
+if [[ "${MT_PYTHON:-}" == true ]]; then
+  python_state="on (MT_PYTHON=true)"
+elif python_left="$(cat "$WINEPREFIX/.python-installed" 2> /dev/null)" && [[ -n "$python_left" ]]; then
+  python_state="off; Python $python_left is still in /config, no longer updated, and MetaTrader and MetaEditor still find it"
+else
+  python_state="off"
+fi
 transfers_shown="$transfers"
 if [[ "$transfers" != none ]]; then
   transfers_shown="$transfers, in $files"
@@ -418,5 +425,5 @@ log "Listening on https://$listen$subfolder (HTTPS only). Host networking: $host
 log "Login: user '$user', password $password_source, kept as a SHA-512 hash that only nginx can read."
 log "Certificate: $cert_source. Clients allowed: $allowed."
 log "Stream: same origin${SELKIES_ALLOWED_ORIGINS:+ and ${SELKIES_ALLOWED_ORIGINS}}; WebSockets only. Clipboard: $clipboard. File transfers: $transfers_shown."
-log "MetaTrader's AI-agent servers: $agents."
+log "MetaTrader's AI-agent servers: $agents. Python: $python_state."
 log "Health check: /healthz on /run/mt/health.sock (plain HTTP, inside the container only)."

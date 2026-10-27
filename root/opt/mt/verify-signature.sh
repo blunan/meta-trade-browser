@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
-# verify-signature.sh metaquotes|microsoft <file>
+# verify-signature.sh metaquotes|microsoft|python <file>
 #
 # Checks an installer's Authenticode signature before it runs. It passes only
 # when osslsigncode verifies the primary signature, timestamp and revocation
-# lists included, and the signer's organisation is exactly MetaQuotes Ltd or
-# Microsoft Corporation. Exit code 0: passed; 1: refused; 2: wrong usage.
+# lists included, and the signer's certificate names its organisation as
+# exactly MetaQuotes Ltd, Microsoft Corporation or Python Software Foundation.
+# Exit code 0: passed; 1: refused; 2: wrong usage.
 #   metaquotes  mt5setup.exe, against Debian's CA bundle. osslsigncode fetches
 #               DigiCert's revocation lists itself.
 #   microsoft   the WebView2 installer, against the two Microsoft roots pinned
-#               in the image. Microsoft serves its revocation lists in a way
-#               osslsigncode's own download refuses, so they're fetched here.
-# No file hash is pinned: the signature is the check, and MetaQuotes and
-# Microsoft replace their files without notice.
+#               in microsoft-roots.pem. Microsoft serves its revocation lists in
+#               a way osslsigncode's own download refuses, so they're fetched here.
+#   python      the Python installer, against the Microsoft root pinned in
+#               microsoft-identity-root.pem: the Python Software Foundation signs
+#               through Microsoft's ID Verified code signing. Its revocation lists
+#               are fetched here too.
+# No file hash is pinned: the signature is the check. MetaQuotes and Microsoft
+# replace their files without notice, and Renovate moves Python's version.
 set -euo pipefail
 
-roots=/opt/mt/certs/microsoft-roots.pem
+certs=/opt/mt/certs
 microsoft_crls=http://www.microsoft.com/pkiops/crl
 
 log() { printf '%s [mt] %s\n' "$(date -u +%FT%TZ)" "$*"; }
@@ -23,8 +28,8 @@ refuse() {
   exit 1
 }
 
-if (( $# != 2 )) || [[ "$1" != metaquotes && "$1" != microsoft ]]; then
-  echo "Usage: verify-signature.sh metaquotes|microsoft <file>" >&2
+if (( $# != 2 )) || [[ "$1" != metaquotes && "$1" != microsoft && "$1" != python ]]; then
+  echo "Usage: verify-signature.sh metaquotes|microsoft|python <file>" >&2
   exit 2
 fi
 kind="$1"
@@ -33,6 +38,20 @@ file="$2"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
+
+# signature_certs: the certificates the file's signature carries, as
+# $tmp/sig.pem and one per file in $tmp/cert-<n>.pem. Fails if the file has no
+# signature.
+certs_split=no
+signature_certs() {
+  if [[ "$certs_split" == no ]]; then
+    osslsigncode extract-signature -pem -in "$file" -out "$tmp/sig.pem" > /dev/null 2>&1 || return 1
+    openssl pkcs7 -in "$tmp/sig.pem" -print_certs 2> /dev/null |
+      awk -v d="$tmp" '/-----BEGIN CERTIFICATE-----/ { n++ } n { print > (d "/cert-" n ".pem") }' ||
+      return 1
+    certs_split=yes
+  fi
+}
 
 log "$(basename "$file"): $(stat -c %s "$file") bytes, SHA-256 $(sha256sum "$file" | cut -d' ' -f1)"
 
@@ -43,17 +62,49 @@ if [[ "$kind" == metaquotes ]]; then
   organisation="MetaQuotes Ltd"
   args+=(-CAfile /etc/ssl/certs/ca-certificates.crt)
 else
-  organisation="Microsoft Corporation"
-  # The signer's certificate comes through Code Signing PCA 2011 or PCA 2024
-  # (newer installers), the timestamp's through Time-Stamp PCA 2010.
   crl() {
     curl -fsS --retry 3 --retry-all-errors --retry-delay 5 --connect-timeout 30 --max-time 120 \
       -o "$tmp/crl.der" "$microsoft_crls/$1" &&
       openssl crl -inform DER -in "$tmp/crl.der" >> "$2"
   }
-  if ! { crl MicCodSigPCA2011_2011-07-08.crl "$tmp/signer.crl" &&
-    crl 'Microsoft%20Code%20Signing%20PCA%202024.crl' "$tmp/signer.crl" &&
-    crl 'Microsoft%20Time-Stamp%20PCA%202010(1).crl' "$tmp/timestamp.crl"; }; then
+  if [[ "$kind" == microsoft ]]; then
+    organisation="Microsoft Corporation"
+    roots="$certs/microsoft-roots.pem"
+    # The signer's certificate comes through Code Signing PCA 2011 or PCA 2024
+    # (newer installers), the timestamp's through Time-Stamp PCA 2010.
+    crl_ok=no
+    if crl MicCodSigPCA2011_2011-07-08.crl "$tmp/signer.crl" &&
+      crl 'Microsoft%20Code%20Signing%20PCA%202024.crl' "$tmp/signer.crl" &&
+      crl 'Microsoft%20Time-Stamp%20PCA%202010(1).crl' "$tmp/timestamp.crl"; then
+      crl_ok=yes
+    fi
+  else
+    organisation="Python Software Foundation"
+    roots="$certs/microsoft-identity-root.pem"
+    # The signer's certificate comes through Identity Verification Root CA 2020,
+    # ID Verified Code Signing PCA 2021 and one of its numbered CAs, which
+    # changes from release to release (EOC CA 03 for 3.14.9, EOC CA 04 for
+    # 3.14.10; there are AOC ones too). The signer's certificate names its CA's
+    # list. The timestamp's comes through Public RSA Timestamping CA 2020.
+    issuer_crl=
+    if signature_certs; then
+      issuer_crl="$(openssl pkcs7 -in "$tmp/sig.pem" -print_certs -text -noout 2> /dev/null |
+        sed -n -E "s|^ *URI:$microsoft_crls/(Microsoft%20ID%20Verified%20CS%20[A-Z]{3}%20CA%20[0-9]{2}\\.crl)\$|\1|p" |
+        head -n 1)" || true
+    fi
+    if [[ -z "$issuer_crl" ]]; then
+      refuse "has no signature through Microsoft's ID Verified code signing, which signs Python's installers."
+    fi
+    crl_ok=no
+    if crl 'Microsoft%20Identity%20Verification%20Root%20Certificate%20Authority%202020.crl' "$tmp/signer.crl" &&
+      crl 'Microsoft%20ID%20Verified%20Code%20Signing%20PCA%202021.crl' "$tmp/signer.crl" &&
+      crl "$issuer_crl" "$tmp/signer.crl" &&
+      crl 'Microsoft%20Identity%20Verification%20Root%20Certificate%20Authority%202020.crl' "$tmp/timestamp.crl" &&
+      crl 'Microsoft%20Public%20RSA%20Timestamping%20CA%202020.crl' "$tmp/timestamp.crl"; then
+      crl_ok=yes
+    fi
+  fi
+  if [[ "$crl_ok" != yes ]]; then
     refuse "can't be checked: Microsoft's revocation lists couldn't be fetched from $microsoft_crls/."
   fi
   # -ignore-cdp: only these lists, no download attempts of osslsigncode's own.
@@ -88,13 +139,30 @@ if (( rc != 0 )) || ! grep -q -x 'Signature verification: ok' <<< "$report"; the
   done <<< "$report"
   refuse "failed its signature check (osslsigncode exit code $rc)."
 fi
-# A whole field, so that "O=MetaQuotes Ltd2" doesn't pass.
-IFS=/ read -r -a fields <<< "$signer"
-signed_by=no
-for field in "${fields[@]}"; do
-  [[ "$field" == "O=$organisation" ]] && signed_by=yes
-done
-if [[ "$signed_by" != yes ]]; then
+# The organisation comes from the signer's certificate itself, one field per
+# line: in osslsigncode's one-line subject, a "/" inside a value would look like
+# the start of another field. The signer is the certificate with the serial
+# number osslsigncode reports for it, and every certificate in the signature
+# with that number must name the organisation, exactly: "MetaQuotes Ltd2"
+# doesn't pass.
+serial="$(awk '/^Signer.s certificate:/ { s = 1 } s && /Serial *:/ { sub(/^[ \t]*Serial *: */, ""); print; exit }' <<< "$report")"
+matches=0
+if [[ -n "$serial" ]] && signature_certs; then
+  for cert in "$tmp"/cert-*.pem; do
+    [[ -f "$cert" && "$(openssl x509 -in "$cert" -noout -serial 2> /dev/null)" == "serial=$serial" ]] || continue
+    if openssl x509 -in "$cert" -noout -subject -nameopt multiline 2> /dev/null |
+      ORGANISATION="$organisation" awk '
+        { i = index($0, " = "); name = substr($0, 1, i - 1); gsub(/^ +| +$/, "", name) }
+        i && name == "organizationName" && substr($0, i + 3) == ENVIRON["ORGANISATION"] { found = 1 }
+        END { exit !found }'; then
+      matches=$((matches + 1))
+    else
+      matches=0
+      break
+    fi
+  done
+fi
+if (( matches == 0 )); then
   refuse "has a valid signature, but not from $organisation: $signer"
 fi
 log "signature ok: signed by $signer, through ${issuer##*/CN=}, timestamp ${timestamp:-none}"

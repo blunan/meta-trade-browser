@@ -9,6 +9,7 @@
 ![MetaTrader 5](https://img.shields.io/badge/MetaTrader-5-4A76B8)
 ![Wine staging](https://img.shields.io/badge/Wine-staging-800000?logo=wine&logoColor=white)
 ![Debian 13 trixie](https://img.shields.io/badge/Debian-13%20trixie-A81D33?logo=debian&logoColor=white)
+![Python 3.14](https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white)
 
 **MetaTrader in your browser.** The MetaTrader terminal and MetaEditor run on a small Linux desktop inside a container, and you use them from any browser as you would on your own computer: charts, Expert Advisors (EAs, the MQL5 programs that trade from a chart), MetaEditor and the Strategy Tester. One container runs one trading account.
 
@@ -22,8 +23,9 @@ It installs MetaTrader 5, MetaQuotes' current release, and runs it under WineHQ 
 * 🔐 **Password and HTTPS** — a password is required, and the desktop is served over HTTPS only.
 * 🏠 **Private by default** — Docker publishes it on the server's loopback address, `127.0.0.1`, unless you choose another. Reach it through an SSH tunnel, a VPN or your own reverse proxy.
 * 🛡️ **A locked-down desktop** — no terminal and no `sudo`, and other websites can't open your desktop's stream or embed its page.
-* ✅ **Signature-checked installers** — MetaQuotes' installer and Microsoft's WebView2 installer are downloaded at the first start, and run only if their code signatures check out. The image itself contains no MetaQuotes or Microsoft software.
+* ✅ **Signature-checked installers** — MetaQuotes' installer and Microsoft's WebView2 installer are downloaded at the first start, and run only if their code signatures check out; so is Python's, if you turn it on. The image itself contains no MetaQuotes or Microsoft software.
 * 📂 **Your EAs, your folder** — an optional folder of your EAs, indicators and scripts appears in MetaTrader as `Mounted`.
+* 🐍 **Optional Python** — with `MT_PYTHON=true`, Windows Python and MetaQuotes' `MetaTrader5` package are installed too, for `.py` scripts on charts.
 * 💾 **Clean stops** — MetaTrader saves its charts and settings at every stop, and starts again by itself if it closes or crashes.
 
 > ⚠️ Not affiliated with or endorsed by MetaQuotes or Microsoft.
@@ -111,7 +113,7 @@ Then browse to `https://localhost:3001`, and accept the certificate warning: the
 | 🚀 [Quick start](https://metatrader-docker.blunan.com/quick-start/) | Every step in full, with `docker run` as well as Compose, and how to trust the certificate |
 | 🌍 [Access and reverse proxy](https://metatrader-docker.blunan.com/access/) | SSH tunnel, VPN, Tailscale, Caddy, nginx, Traefik, cloudflared, your own certificate and host networking |
 | ⚙️ [Folders and settings](https://metatrader-docker.blunan.com/settings/) | What `data`, `ea` and the password file hold, backups, every setting, and what the startup check refuses or warns about |
-| 🖱️ [Using MetaTrader](https://metatrader-docker.blunan.com/using/) | Clipboard, sound, shortcuts, MetaEditor, the HTML panes and memory |
+| 🖱️ [Using MetaTrader](https://metatrader-docker.blunan.com/using/) | Clipboard, sound, shortcuts, MetaEditor, the HTML panes, memory and Python |
 | 🔄 [Operations and updates](https://metatrader-docker.blunan.com/operations/) | Stopping, restarts, health check, image tags, updating and MetaTrader's LiveUpdate |
 | 🩺 [Troubleshooting](https://metatrader-docker.blunan.com/troubleshooting/) | Where the logs are, failed installs and harmless messages |
 | 🔏 [Security and verification](https://metatrader-docker.blunan.com/verify/) | Pin a digest and check its cosign signature, outgoing connections and AI-agent servers |
@@ -123,4 +125,4 @@ Copyright (C) 2026 Brayan Luna
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 3. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See [LICENSE](LICENSE) for the full text.
 
-The image is built on [linuxserver.io's](https://www.linuxserver.io/) Selkies base image, also GPL-3.0. At the first start it downloads MetaQuotes' MetaTrader 5 and Microsoft's Edge WebView2 Runtime from their publishers. They come under their own license terms, not this project's. This project isn't affiliated with or endorsed by MetaQuotes or Microsoft.
+The image is built on [linuxserver.io's](https://www.linuxserver.io/) Selkies base image, also GPL-3.0. At the first start it downloads MetaQuotes' MetaTrader 5 and Microsoft's Edge WebView2 Runtime from their publishers. With `MT_PYTHON=true` it also downloads Python from python.org, and the `MetaTrader5` and `numpy` packages from PyPI. They come under their own license terms, not this project's. This project isn't affiliated with or endorsed by MetaQuotes or Microsoft.

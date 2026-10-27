@@ -24,3 +24,22 @@
     - If you use the panes a lot, set `mem_limit: 6g` (`--memory 6g`).
     - The MQL5 reference is also online, at <https://www.mql5.com/en/docs>.
 - **Memory sizing:** about 0.5 GB with MetaTrader running EAs and nobody connected, 1.5 GB with a browser connected, 2.4 GB during a heavy backtest, and up to 4 GB with an HTML pane open.
+
+## Python
+
+With `MT_PYTHON=true` (see [Folders and settings](settings.md#the-main-settings)), the next start installs Windows Python 3.14 and MetaQuotes' [`MetaTrader5` package](https://www.mql5.com/en/docs/python_metatrader5) into `/config`. It downloads Python's 64-bit installer from python.org, and runs it only if the Python Software Foundation's signature checks out. Then pip installs `MetaTrader5`, and `numpy`, the one package it needs, from PyPI. Those have no signature to check, so the image lists the version of each with the SHA-256 hashes of its files, and pip installs a file only if its hash is on that list. This takes under a minute, and adds about 130 MB to `/config`. MetaTrader and MetaEditor find Python by themselves: MetaEditor shows its folder under **Tools → Options → Compilers**.
+
+- **On a chart:** a `.py` script in `MQL5/Scripts`, or in the EA folder's `Scripts` (*Scripts → Mounted* in the Navigator), runs on a chart when you double-click it or drag it onto one (Enter or *Modify* opens it in MetaEditor). What it prints appears in the Toolbox's *Experts* tab.
+- **What a script can do:** a `.py` script runs as an ordinary program, with everything MetaTrader itself can reach: the files in `/config` and the EA folder, the network, and other programs. MetaTrader's limits for MQL5 programs, such as **Allow DLL imports** and the **WebRequest** list, don't apply to it. Run only scripts you'd run on your own computer.
+- **The `MetaTrader5` package** connects to MetaTrader once MetaTrader has logged in to a trading account. Before the first login, `initialize()` fails with `(-10005, 'IPC timeout')`.
+- **Trading from Python:** with the quick start's [step 6](quick-start.md#6-set-up-metatrader) settings, **Disable algorithmic trading via external Python API** is on. Scripts, on a chart or through `docker exec`, can read prices and the account, but `order_send` is refused with `10027` (*AutoTrading disabled by client*), as when Algo Trading is off. Untick that option, with **Allow algorithmic trading** on, when a script needs to trade.
+- **From `docker exec`:** to run Python, or to install another package into `/config`:
+
+    ```sh
+    docker exec -u abc metatrader-docker wine python -c "import MetaTrader5 as mt5; print(mt5.initialize(), mt5.version()); mt5.shutdown()"
+    docker exec -u abc metatrader-docker wine python -m pip install --only-binary=:all: pandas
+    ```
+
+- **Updates:** a new image with a newer Python 3.14 release upgrades Python at its first start, and one with newer package versions installs them. Going back to an older image keeps the newer Python, and puts back that image's packages. For a newer `MetaTrader5` before an image brings it: `docker exec -u abc metatrader-docker wine python -m pip install --upgrade --only-binary=:all: MetaTrader5`. That one isn't checked against the image's list, and stays until an image with another list replaces it.
+- **If Python can't be installed:** during MetaTrader's first install, MetaTrader waits for it, as for the other steps: the window says why, and tries again 60 s later. Later on, when you turn `MT_PYTHON` on for an account in use, or a new image brings a newer Python or packages, MetaTrader starts all the same: a window on the desktop says why, above MetaTrader until you close it, the log has a `WARNING` line with the reason, and the next start tries again.
+- **Turning it off** leaves Python in `/config`, and stops its upgrades. MetaTrader and MetaEditor still find it, and the startup log says so at each start.

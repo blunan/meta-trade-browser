@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Access-layer tests for the metatrader-docker image, and T21: the window the desktop
-# shows while MetaTrader can't start.
+# Access-layer tests for the metatrader-docker image, T21: the window the desktop
+# shows while MetaTrader can't start, and the installers' signature check
+# refusing an unsigned file or a signer that only writes the organisation into
+# another field of its name.
 #
 # Each configuration runs the image on an internal Docker network, which has
 # no internet: MetaTrader's first-start downloads fail at once, and the access layer
@@ -83,6 +85,14 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=mt-access-test \
   -keyout "$tmp/tls.key" -out "$tmp/tls.crt" 2> /dev/null
 openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out "$tmp/other.key" 2> /dev/null
 own_cert=(-v "$tmp/tls.crt:/config/ssl/cert.pem:ro" -v "$tmp/tls.key:/config/ssl/cert.key:ro")
+# Docker 29.4.2's seccomp profile refused socketcall, the call 32-bit programs
+# open sockets with, with ENOSYS (38). Wine's 32-bit programs need it. This
+# profile refuses that call and nothing else.
+cat > "$tmp/no-socketcall.json" << 'EOF'
+{"defaultAction": "SCMP_ACT_ALLOW",
+ "architectures": ["SCMP_ARCH_X86_64", "SCMP_ARCH_X86", "SCMP_ARCH_X32"],
+ "syscalls": [{"names": ["socketcall"], "action": "SCMP_ACT_ERRNO", "errnoRet": 38}]}
+EOF
 
 # start <network> <name> [docker run options...]
 start() {
@@ -194,6 +204,24 @@ logged() {
   local logs
   logs="$(docker logs "$run-$1" 2>&1)"
   grep -qF -- "$2" <<< "$logs"
+}
+
+# until_logged <name> <text>: waits up to 120 s for the text in the container's
+# log; succeeds if it came.
+until_logged() {
+  local _
+  for _ in $(seq 1 120); do
+    logged "$1" "$2" && return 0
+    sleep 1
+  done
+  return 1
+}
+
+# dump_log <name>: run-terminal.sh's log, with Wine's own errors, which docker
+# logs mixes with the other services' lines.
+dump_log() {
+  echo "  run-terminal.log:"
+  docker exec "$run-$1" cat /config/log/mt/run-terminal.log 2>&1 | sed 's/^/    /' || true
 }
 
 # listeners <name>: the container's listening TCP and UDP sockets, as
@@ -316,6 +344,46 @@ refused "T10: SELKIES_FILE_TRANSFERS=none|locked" "SELKIES_FILE_TRANSFERS must b
 refused "T10: SELKIES_CLIPBOARD_ENABLED=off" "SELKIES_CLIPBOARD_ENABLED must be" "${with_password[@]}" -e SELKIES_CLIPBOARD_ENABLED=off
 refusals_checked
 
+echo "The installers' signature check"
+# Offline, a file with no signature is refused before any download.
+rc=0
+out="$(docker exec "$run-probe" /opt/mt/verify-signature.sh python /etc/hostname 2>&1)" || rc=$?
+check "Signature check: an unsigned file is refused as Python's installer" 1 "$rc"
+check_true "Signature check: ...because it isn't signed through Microsoft's ID Verified code signing" grep -qF \
+  "REFUSED: hostname has no signature through Microsoft's ID Verified code signing" <<< "$out"
+rc=0
+docker exec "$run-probe" /opt/mt/verify-signature.sh pip /etc/hostname > /dev/null 2>&1 || rc=$?
+check "Signature check: an unknown kind is a usage error" 2 "$rc"
+# The organisation comes from the signer's certificate, not from text in another
+# field of its name. In a container of its own, a test CA joins Debian's CA
+# bundle and signs a Wine program twice: as MetaQuotes Ltd, and as Spoof Ltd
+# with "Spoof/O=MetaQuotes Ltd" as its common name. Neither certificate names a
+# revocation list, so this works offline.
+out="$(docker run --rm --network none --memory 256m --cap-drop ALL --security-opt no-new-privileges:true \
+  --entrypoint bash "$image" -c '
+    set -euo pipefail
+    cd "$(mktemp -d)"
+    exe=/opt/wine-staging/lib/wine/x86_64-windows/hostname.exe
+    openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=mt-access test CA" \
+      -addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign,cRLSign \
+      -keyout ca.key -out ca.pem 2> /dev/null
+    cat ca.pem >> /etc/ssl/certs/ca-certificates.crt
+    printf "basicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=codeSigning\n" > leaf.ext
+    for signer in "real:/O=MetaQuotes Ltd/CN=MetaQuotes Ltd" "spoofed:/O=Spoof Ltd/CN=Spoof\/O=MetaQuotes Ltd"; do
+      name="${signer%%:*}"
+      openssl req -newkey rsa:2048 -nodes -subj "${signer#*:}" -keyout "$name.key" -out "$name.csr" 2> /dev/null
+      openssl x509 -req -in "$name.csr" -CA ca.pem -CAkey ca.key -CAcreateserial -days 1 \
+        -extfile leaf.ext -out "$name.pem" 2> /dev/null
+      osslsigncode sign -certs "$name.pem" -key "$name.key" -h sha256 -in "$exe" -out "$name.exe" > /dev/null
+      rc=0
+      /opt/mt/verify-signature.sh metaquotes "$name.exe" || rc=$?
+      echo "$name exit $rc"
+    done' 2>&1)" || true
+check_true "Signature check: a test CA's MetaQuotes Ltd passes, offline" grep -qx "real exit 0" <<< "$out"
+check_true "Signature check: \"Spoof/O=MetaQuotes Ltd\" as the common name is refused" grep -qx "spoofed exit 1" <<< "$out"
+check_true "Signature check: ...because the signer's organisation is Spoof Ltd" grep -qF \
+  "REFUSED: spoofed.exe has a valid signature, but not from MetaQuotes Ltd" <<< "$out"
+
 echo "Defaults (T2, T3, T5-T8, T13, T14, T16, T17, T19-T21)"
 start "$net" main "${with_password[@]}"
 if ready main; then
@@ -418,10 +486,15 @@ if ready main; then
     pass "Q5: health checks aren't logged"
   fi
   # Offline, the first start fails at step 2, and the window says why.
-  for _ in $(seq 1 120); do
-    logged main "Retrying in 60 s" && break
-    sleep 1
-  done
+  until_logged main "Retrying in 60 s" || true
+  failures_before=$failures
+  check_true "MT_PYTHON unset: three install steps" logged main "step 2 of 3: Microsoft Edge WebView2"
+  check_true "MT_PYTHON unset: the log says Python: off" logged main "Python: off."
+  check "the first install is marked as under way" yes \
+    "$(docker exec "$run-main" sh -c '[ -f /config/.wine/.installing ] && echo yes || echo no')"
+  if (( failures > failures_before )); then
+    dump_log main
+  fi
   check "T21: the startup window: one, framed like MetaTrader's windows, not filling the screen, centred" \
     "1 framed small centred" "$(notice_window main)"
   # The size changes the way the desktop sets it, as when a browser connects.
@@ -433,6 +506,20 @@ if ready main; then
     > /dev/null 2>&1 || true
   check "T21: the screen changes size" "1600 900" "$(docker exec "$run-main" xdotool getdisplaygeometry)"
   check "T21: the window is centred again" "1 framed small centred" "$(notice_window main)"
+  # After a later Python failure, the window stays above MetaTrader's: notice.py
+  # on its own, as run-terminal.sh leaves it at the hand-off. The retry window
+  # open next to it doesn't stay above.
+  docker exec -d -u abc "$run-main" sh -c \
+    'printf "warning\tThe Python download failed.\n" | timeout 30 /usr/bin/python3 -I /opt/mt/notice.py'
+  above=0
+  for _ in $(seq 1 10); do
+    above="$(docker exec "$run-main" sh -c '
+      for id in $(xdotool search --onlyvisible --classname "^mt-notice\$"); do xprop -id "$id" _NET_WM_STATE; done' \
+      2> /dev/null | grep -c _NET_WM_STATE_ABOVE || true)"
+    [[ "$above" == 1 ]] && break
+    sleep 1
+  done
+  check "MT_PYTHON: Python's warning window stays above the others, and only it" 1 "$above"
   # The certificate the base makes, as its init-nginx makes it.
   docker exec -u abc "$run-main" openssl req -new -x509 -days 3650 -nodes \
     -out /config/ssl/cert.pem -keyout /config/ssl/cert.key \
@@ -602,8 +689,8 @@ if ready sidecar; then
 fi
 docker rm -f "$run-sidecar" "$run-tailnet" > /dev/null
 
-echo "SUBFOLDER=/mt/ (T12), SELKIES_FILE_TRANSFERS=false (T8), SELKIES_COMMAND_ENABLED=true (warning)"
-start "$net" sub "${with_password[@]}" -e SUBFOLDER=/mt/ -e SELKIES_FILE_TRANSFERS=false -e SELKIES_COMMAND_ENABLED=true
+echo "SUBFOLDER=/mt/ (T12), SELKIES_FILE_TRANSFERS=false (T8), MT_PYTHON=true, SELKIES_COMMAND_ENABLED=true (warning)"
+start "$net" sub "${with_password[@]}" -e SUBFOLDER=/mt/ -e SELKIES_FILE_TRANSFERS=false -e MT_PYTHON=true -e SELKIES_COMMAND_ENABLED=true
 if ready sub; then
   t="$run-sub:3001"
   check "T12: the desktop under /mt/" 200 "$(code -u "$user:$password" "https://$t/mt/")"
@@ -612,9 +699,26 @@ if ready sub; then
   check "T8: POST /api/upload with SELKIES_FILE_TRANSFERS=false" 403 \
     "$(code -u "$user:$password" -X POST -H "Origin: https://$t" -F 'file=@/etc/hostname' "https://$t/mt/api/upload")"
   check_true "T8: the log says file transfers: none" logged sub "File transfers: none."
+  check_true "MT_PYTHON=true is logged" logged sub "Python: on (MT_PYTHON=true)."
+  for _ in $(seq 1 60); do
+    logged sub "step 1 of 4: creating the Wine prefix" && break
+    sleep 1
+  done
+  check_true "MT_PYTHON=true: four install steps" logged sub "step 1 of 4: creating the Wine prefix"
   check_true "SELKIES_COMMAND_ENABLED=true is warned about" logged sub "WARNING: SELKIES_COMMAND_ENABLED=true"
 fi
 docker rm -f "$run-sub" > /dev/null
+
+echo "A seccomp profile that blocks socketcall, as Docker 29.4.2's does"
+start "$net" seccomp --security-opt "seccomp=$tmp/no-socketcall.json" "${with_password[@]}"
+until_logged seccomp "Retrying in 60 s" || true
+failures_before=$failures
+check_true "Seccomp: the first install says Docker 29.4.2's profile stops it" \
+  logged seccomp "as Docker 29.4.2's does"
+if (( failures > failures_before )); then
+  dump_log seccomp
+fi
+docker rm -f "$run-seccomp" > /dev/null
 
 if [[ "$host_test" == yes ]]; then
   echo "Host networking (T15), on this machine's 127.0.0.1:3911"

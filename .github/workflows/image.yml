@@ -32,6 +32,8 @@ env:
   COSIGN_VERSION: v3.1.3
   # renovate: datasource=github-releases depName=aquasecurity/trivy
   TRIVY_VERSION: v0.75.0
+  # renovate: datasource=github-tags depName=docker/cli
+  DOCKER_VERSION: v29.9.2
 
 jobs:
   test:
@@ -94,6 +96,17 @@ jobs:
         run: |
           echo "version=$(date -u +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      # The runner's own Docker can lag behind: in October 2026 it was 29.4.2,
+      # whose seccomp profile blocks the socket calls of 32-bit programs, so Wine
+      # couldn't create its prefix. The tests run on this Docker Engine instead,
+      # started next to the runner's. DOCKER_HOST points every later step at it,
+      # Trivy too.
+      - uses: docker/setup-docker-action@2bf61fb9464cc67f0cbdeabed6aa0380accd1c70 # v5.5.0
+        if: steps.changes.outputs.image == 'true'
+        with:
+          version: ${{ env.DOCKER_VERSION }}
+          set-host: true
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         if: steps.changes.outputs.image == 'true'

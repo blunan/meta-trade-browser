@@ -4,6 +4,7 @@
 # example:
 #   docker compose -f compose.yaml -f tests/compose.dev.yaml build
 #   docker compose -f compose.yaml -f tests/compose.dev.yaml up -d
+# With MT_PYTHON=true in front of the second command, it installs Python too.
 # Paths are relative to the first file's folder, the repository's root.
 # mem_limit stays the example's 4g, so tests see what users get.
 name: mt-dev
@@ -16,6 +17,7 @@ services:
     restart: "no"                              # a test run doesn't come back after a reboot
     environment:
       TITLE: MetaTrader dev
+      MT_PYTHON: ${MT_PYTHON:-}                # empty: off
     volumes:
       - ./dev/data:/config
       - ./dev/ea:/mql5
@@ -24,4 +26,4 @@ services:
 
 secrets:
   password:
-    file: ./secrets/dev_password
+    file: ./dev/secrets/dev_password
