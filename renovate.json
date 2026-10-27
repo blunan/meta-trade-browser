@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Update PRs for the base image's digest, Wine, Windows Python and its packages (MT_PYTHON), the workflows' actions, and the cosign and Trivy versions. On Monday mornings the workflows' actions, runners and the docs build's Python version come together in one PR, Wine comes in its own, and the other minor and patch updates, Windows Python's and its packages' among them, in a third. Actions stay pinned to commit SHAs. Nothing merges by itself, and Renovate never asks GitHub to auto-merge. When a setting here is renamed or deprecated, Renovate opens a PR that migrates this file.",
+  "description": "Update PRs for the base image's digest, Wine, Windows Python and its packages (MT_PYTHON), the workflows' actions, and the cosign and Trivy versions. On Monday mornings the workflows' actions, runners and the docs build's Python version come together in one PR, Wine comes in its own, Windows Python and its packages in another, and the other minor and patch updates, which CI tests alone, in a fourth. Actions stay pinned to commit SHAs. Nothing merges by itself, and Renovate never asks GitHub to auto-merge. Every PR is assigned to blun4n-ai, and the ones that need a start by hand (Wine, Windows Python and its packages) carry the manual-test label. When a setting here is renamed or deprecated, Renovate opens a PR that migrates this file.",
   "extends": [
     "config:recommended",
     ":configMigration"
@@ -10,20 +10,23 @@
   "internalChecksFilter": "strict",
   "automerge": false,
   "platformAutomerge": false,
+  "assignees": ["blun4n-ai"],
   "ignorePaths": ["docs/requirements.in", "docs/requirements.txt"],
   "ignoreDeps": ["ghcr.io/blunan/metatrader-docker"],
   "packageRules": [
     {
       "description": "GHCR gives image digests no release date, so the base image's updates can't wait 14 days: review and the PR's Image tests are the gate.",
       "matchDatasources": ["docker"],
+      "addLabels": ["docker"],
       "minimumReleaseAgeBehaviour": "timestamp-optional"
     },
     {
-      "description": "Minor and patch updates come together in one PR on Monday mornings, so merging them publishes one image a week, not one per update. Majors, the base image's digest and Wine keep their own PRs.",
-      "matchManagers": ["!github-actions"],
-      "matchDepNames": ["!winehq-staging"],
+      "description": "Minor and patch updates come together in one PR on Monday mornings, so merging them publishes one image a week, not one per update. Majors, the base image's digest, Wine and Windows Python with its packages keep PRs of their own, so CI alone tests everything in this one.",
+      "matchManagers": ["!github-actions", "!pip_requirements"],
+      "matchDepNames": ["!winehq-staging", "!python/cpython"],
       "matchUpdateTypes": ["minor", "patch"],
-      "groupName": "Minor and patch updates",
+      "groupName": "Minor and Patch Updates",
+      "addLabels": ["minor-patch"],
       "schedule": ["* 0-5 * * 1"]
     },
     {
@@ -31,32 +34,39 @@
       "matchManagers": ["github-actions"],
       "pinDigests": true,
       "groupName": "GitHub Actions",
+      "addLabels": ["github-actions"],
       "schedule": ["* 0-5 * * 1"]
     },
     {
-      "description": "Wine (WINE_VERSION in the Dockerfile) comes from WineHQ's Debian 13 repository, which gives no release dates either, so its updates can't wait 14 days. Release candidates are left out. Each release comes in its own PR on Monday mornings, and a PR that isn't merged moves on to newer releases. CI doesn't install MetaTrader, so a first start is checked by hand before merging. The minor and patch rule skips Wine, so no update matches both rules.",
+      "description": "Wine (WINE_VERSION in the Dockerfile) comes from WineHQ's Debian 13 repository, which gives no release dates either, so its updates can't wait 14 days. Release candidates are left out. Each release comes in its own PR on Monday mornings, and a PR that isn't merged moves on to newer releases. CI doesn't install MetaTrader, so a first start is checked by hand before merging, and the PR carries the manual-test label. The minor and patch rule skips Wine, so no update matches both rules.",
       "matchDepNames": ["winehq-staging"],
       "registryUrls": ["https://dl.winehq.org/wine-builds/debian?suite=trixie&components=main&binaryArch=amd64"],
       "allowedVersions": "/^\\d+(\\.\\d+)+~trixie-\\d+$/",
       "minimumReleaseAgeBehaviour": "timestamp-optional",
-      "commitMessageTopic": "Wine",
       "schedule": ["* 0-5 * * 1"],
+      "addLabels": ["manual-test", "wine"],
       "prBodyNotes": [
         "CI doesn't install MetaTrader, so check this Wine before merging: build this branch and start it with `tests/compose.dev.yaml`. The log should show both `signature ok` lines and `starting MetaTrader`, and the container should turn `healthy`. With a demo account logged in, MetaTrader should log back in after each of a few restarts."
       ]
     },
     {
-      "description": "Windows Python in run-terminal.sh stays on 3.14, the newest series MetaQuotes publishes a MetaTrader5 wheel for. Its patch releases join Monday's minor and patch PR. CI doesn't install Python, so the PR says how to check it by hand.",
+      "description": "Windows Python in run-terminal.sh stays on 3.14, the newest series MetaQuotes publishes a MetaTrader5 wheel for. Its patch releases come in one PR with the packages' below, on Monday mornings, not in the minor and patch PR, which CI alone can test. CI doesn't install Python, so the PR says how to check it by hand and carries the manual-test label. The minor and patch rule skips it, so no update matches both rules.",
       "matchDatasources": ["github-tags"],
       "matchDepNames": ["python/cpython"],
       "allowedVersions": "/^3\\.14\\.\\d+$/",
+      "groupName": "Windows Python",
+      "schedule": ["* 0-5 * * 1"],
+      "addLabels": ["manual-test", "windows-python"],
       "prBodyNotes": [
         "CI doesn't install Python, so check the new Python before merging: build this branch and start it with `tests/compose.dev.yaml` and `MT_PYTHON=true`, on a `dev/data` that has the previous Python. The log should show the Python Software Foundation's `signature ok` line, `step 4 of 4 done` with the new version and `starting MetaTrader`, and the container should turn `healthy`. With an account logged in (a demo will do), `tests/python.sh` should pass."
       ]
     },
     {
-      "description": "The packages MT_PYTHON installs, MetaTrader5 and numpy, pinned with the hashes of their files in root/opt/mt/python-requirements.txt. Renovate updates the hashes with each version (hashin), and its minor and patch releases join Monday's minor and patch PR. CI doesn't install them, so the PR says how to check them by hand.",
+      "description": "The packages MT_PYTHON installs, MetaTrader5 and numpy, pinned with the hashes of their files in root/opt/mt/python-requirements.txt. Renovate updates the hashes with each version (hashin), and their releases come in the same PR as Windows Python's, on Monday mornings (majors in a second, as for the workflows' actions), not in the minor and patch PR, which CI alone can test. CI doesn't install them, so the PR says how to check them by hand and carries the manual-test label. The minor and patch rule skips this manager, so no update matches both rules.",
       "matchFileNames": ["root/opt/mt/python-requirements.txt"],
+      "groupName": "Windows Python",
+      "schedule": ["* 0-5 * * 1"],
+      "addLabels": ["manual-test", "windows-python"],
       "prBodyNotes": [
         "CI doesn't install Python's packages, so check them before merging: build this branch and start it with `tests/compose.dev.yaml` and `MT_PYTHON=true`, on a `dev/data` that has Python. The log should show `step 4 of 4: the MetaTrader5 package`, then `step 4 of 4 done` with the new versions and `starting MetaTrader`, and the container should turn `healthy`. With an account logged in (a demo will do), `tests/python.sh` should pass."
       ]
