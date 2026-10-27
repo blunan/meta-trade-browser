@@ -21,6 +21,8 @@ tests/access.sh
 
     With `MT_PYTHON=true` in front of the second command, it installs Python too.
 
+- `tests/python.sh` checks that container's Python, once MetaTrader has logged in to an account (a demo will do): the `MetaTrader5` package connects, and nothing listens on the network while a script is attached, only HTTPS on 3001. CI can't run it, since it doesn't install MetaTrader.
+
 ## In CI
 
 `.github/workflows/image.yml` runs the same checks on every pull request and on `main`:

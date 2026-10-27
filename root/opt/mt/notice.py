@@ -1,10 +1,13 @@
 #!/usr/bin/python3 -I
-# notice.py: the window on the desktop while MetaTrader can't start yet.
-# run-terminal.sh opens it, and sends it one line per update, its fields
-# separated by tabs:
+# notice.py: the window on the desktop while MetaTrader can't start yet, or
+# when Python couldn't be installed or updated. run-terminal.sh opens it, and
+# sends it one line per update, its fields separated by tabs:
 #   install <step>             MetaTrader is installing, and is at this step
 #   retry <seconds> <reason>   this attempt failed; the next starts in <seconds>
 #   start                      MetaTrader is starting
+#   warning <reason>           Python couldn't be installed or updated, but
+#                              MetaTrader starts: this one stays above
+#                              MetaTrader's window until it's closed
 #
 # Openbox manages it, so it has the same title bar as MetaTrader's windows, and
 # it's styled like MetaTrader's dialogs under Wine: the colours are theirs.
@@ -184,8 +187,20 @@ class Notice(Gtk.Window):
         elif kind == "start" and not args:
             self.deadline = None
             self.show_state("Starting MetaTrader", bar=True)
+        elif kind == "warning" and len(args) == 1:
+            self.deadline = None
+            self.show_state(
+                "Python couldn't be installed or updated",
+                icon=True,
+                detail=args[0],
+                note="MetaTrader runs all the same, and the next start tries again. "
+                "The container's log (docker logs) has the details.",
+                above=True,
+            )
 
-    def show_state(self, heading, icon=False, detail=None, bar=False, note=None):
+    def show_state(self, heading, icon=False, detail=None, bar=False, note=None, above=False):
+        # Above MetaTrader's maximized window, or it would hide this one.
+        self.set_keep_above(above)
         self.heading.set_text(heading)
         self.icon.set_visible(icon)
         self.bar.set_visible(bar)

@@ -479,6 +479,20 @@ if ready main; then
     > /dev/null 2>&1 || true
   check "T21: the screen changes size" "1600 900" "$(docker exec "$run-main" xdotool getdisplaygeometry)"
   check "T21: the window is centred again" "1 framed small centred" "$(notice_window main)"
+  # After a later Python failure, the window stays above MetaTrader's: notice.py
+  # on its own, as run-terminal.sh leaves it at the hand-off. The retry window
+  # open next to it doesn't stay above.
+  docker exec -d -u abc "$run-main" sh -c \
+    'printf "warning\tThe Python download failed.\n" | timeout 30 /usr/bin/python3 -I /opt/mt/notice.py'
+  above=0
+  for _ in $(seq 1 10); do
+    above="$(docker exec "$run-main" sh -c '
+      for id in $(xdotool search --onlyvisible --classname "^mt-notice\$"); do xprop -id "$id" _NET_WM_STATE; done' \
+      2> /dev/null | grep -c _NET_WM_STATE_ABOVE || true)"
+    [[ "$above" == 1 ]] && break
+    sleep 1
+  done
+  check "MT_PYTHON: Python's warning window stays above the others, and only it" 1 "$above"
   # The certificate the base makes, as its init-nginx makes it.
   docker exec -u abc "$run-main" openssl req -new -x509 -days 3650 -nodes \
     -out /config/ssl/cert.pem -keyout /config/ssl/cert.key \

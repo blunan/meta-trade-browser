@@ -21,8 +21,9 @@
 # step is done. Otherwise MetaEditor would install WebView2 by itself, unchecked.
 # .installing marks this first install while it's under way, and Python waits
 # like the other steps only then. Turned on later, or upgraded, Python never
-# holds MetaTrader back: a failure is logged, MetaTrader starts all the same,
-# and the next start tries again. MetaTrader and MetaEditor find that Python by
+# holds MetaTrader back: a failure is logged, a window on the desktop says why,
+# above MetaTrader until it's closed, MetaTrader starts all the same, and the
+# next start tries again. MetaTrader and MetaEditor find that Python by
 # themselves.
 #
 # Every start then sets Edge's Windows version and MetaTrader's AI-agent servers,
@@ -90,6 +91,8 @@ fi
 notice_pid=
 notice_fd=
 tmp=
+# Why Python couldn't be installed or updated, after the first install.
+python_warning=
 # notice <field>...: updates the window on the desktop while MetaTrader can't
 # start yet, opening it the first time. notice.py lists the lines it takes; the
 # fields go out tab-separated. Its errors go to this script's log.
@@ -193,12 +196,14 @@ python_ready() {
 }
 
 # python_failed <reason>: during the first install, the same as fail. Otherwise
-# MetaTrader starts all the same, with the Python it had, if any.
+# MetaTrader starts all the same, with the Python it had, if any, and the window
+# on the desktop says why.
 python_failed() {
   if [[ -f "$WINEPREFIX/.installing" ]]; then
     fail "$1"
   fi
   log "WARNING: $1. MetaTrader starts all the same, and the next start tries again."
+  python_warning="${1^}."
 }
 
 prepare_prefix() {
@@ -414,7 +419,13 @@ set_ai_agents || fail "MetaTrader's AI-agent servers couldn't be set in Config/a
 link_mounts
 # The window stays until MetaTrader's own appears, at most 60 s, so the desktop
 # isn't empty in between. exec ends this script, so a background job closes it.
-if [[ -n "$notice_pid" ]]; then
+# A Python warning stays instead, above MetaTrader, until it's closed: it ends
+# with MetaTrader.
+if [[ -n "$python_warning" ]]; then
+  notice warning "$python_warning"
+  exec {notice_fd}>&-
+  notice_pid=
+elif [[ -n "$notice_pid" ]]; then
   notice start
   exec {notice_fd}>&-
   (

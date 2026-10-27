@@ -412,6 +412,8 @@ else
 fi
 if [[ "${MT_PYTHON:-}" == true ]]; then
   python_state="on (MT_PYTHON=true)"
+elif python_left="$(cat "$WINEPREFIX/.python-installed" 2> /dev/null)" && [[ -n "$python_left" ]]; then
+  python_state="off; Python $python_left is still in /config, no longer updated, and MetaTrader and MetaEditor still find it"
 else
   python_state="off"
 fi
