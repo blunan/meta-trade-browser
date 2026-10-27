@@ -6,7 +6,7 @@ What needs files, such as your EAs or a certificate of your own, needs no enviro
 
 | In the container | On the server | What's in it |
 |---|---|---|
-| `/config` (required) | `./data` | Everything for the account: Wine, the MetaTrader program, account logins and servers, charts with their EAs and inputs, settings, price history and logs, and the desktop's certificate. MetaTrader updates itself here. |
+| `/config` (required) | `./data` | Everything for the account: Wine, the MetaTrader program, account logins and servers, charts with their EAs and inputs, settings, price history and logs, the desktop's certificate, and Windows Python if you turn it on. MetaTrader updates itself here. |
 | `/mql5` (optional) | `./ea` | Your own EAs, indicators and scripts, laid out like MetaTrader's `MQL5` folder: `Experts`, `Indicators`, `Scripts`, `Include`, `Libraries`, `Presets`. |
 | `/run/secrets/password` | `./secrets/password` | The desktop password. |
 | `/config/ssl/cert.pem`, `/config/ssl/cert.key` (optional) | your certificate's files, such as `./tls/cert.pem` | A certificate of your own, and its key (see [Your own certificate](access.md#your-own-certificate)). |
@@ -37,7 +37,7 @@ What needs files, such as your EAs or a certificate of your own, needs no enviro
 | `TZ` | UTC | The desktop's time zone. MetaTrader shows its server's time anyway. |
 | `SELKIES_CLIPBOARD_ENABLED` | `true` | The shared clipboard: `true`, `in` (browser to desktop only), `out` (desktop to browser only) or `false`. |
 | `SELKIES_FILE_TRANSFERS` | `false` | `true` turns on file transfers through the browser, and the side panel's file panel with them. `upload` or `download` allows one direction only. Uploads land in the [EA folder](#the-ea-folder-mql5)'s `Experts` when it's mounted and writable, and appear in the Navigator under *Expert Advisors → Mounted* after *Refresh*. Otherwise they land in MetaTrader's own `MQL5/Experts`, in `/config`, and appear under *Expert Advisors*. The file panel offers downloads from the same folder, and can't choose another. |
-| `MT_PYTHON` | off | `true` installs Windows Python and MetaQuotes' `MetaTrader5` package into `/config` at the next start, once the Python Software Foundation's signature passes and the packages' hashes match the image's list. MetaTrader and MetaEditor find it by themselves (see [Python](using.md#python)). |
+| `MT_PYTHON` | off | `true` installs Windows Python and MetaQuotes' `MetaTrader5` package (and `numpy`) into `/config` at the next start, once the Python Software Foundation's signature passes and the packages' hashes match the image's list. MetaTrader and MetaEditor find it by themselves (see [Python](using.md#python)). |
 | `MT_AI_AGENTS` | off | `true` turns on MetaTrader's and MetaEditor's servers for AI agents (see [MetaTrader's AI-agent servers](verify.md#metatraders-ai-agent-servers)). |
 
 ## Reverse proxy, VPN and host networking

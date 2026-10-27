@@ -2,13 +2,14 @@
 # publish everything ever committed. Keep private and local files out.
 
 # Deployment values, secrets and your EAs (see compose.yaml and the README)
+dev/
 .env
-.env.*
-compose.override.yaml
 *.key
-secrets/
-data/
+.env.*
 ea/
+data/
+secrets/
+compose.override.yaml
 
 # Local-only material
 ignore/
