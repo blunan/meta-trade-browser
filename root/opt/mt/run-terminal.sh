@@ -12,7 +12,8 @@
 #      signature passes (.webview2-installed);
 #   3. MetaTrader, once MetaQuotes' signature passes (.mt5-installed);
 #   4. when MT_PYTHON=true, Windows Python and the MetaTrader5 package, once the
-#      Python Software Foundation's signature passes (.python-installed).
+#      Python Software Foundation's signature passes (.python-installed holds
+#      python_version, so an image update with a newer one upgrades it in place).
 # A failed step is retried 60 s later, and MetaTrader doesn't start before every
 # step is done. Otherwise MetaEditor would install WebView2 by itself, unchecked.
 #
@@ -152,6 +153,12 @@ webview2_version() {
   basename "$(dirname "${exes[0]}")"
 }
 
+# python_ready: succeeds unless MT_PYTHON=true needs Python installed or upgraded.
+python_ready() {
+  [[ "${MT_PYTHON:-}" != true ]] ||
+    [[ "$(cat "$WINEPREFIX/.python-installed" 2> /dev/null || true)" == "$python_version" ]]
+}
+
 # python_compiler_path: sets MetaTrader's and MetaEditor's Python folder
 # (Tools -> Options -> Compilers) when Python is installed and none is set yet.
 python_compiler_path() {
@@ -253,12 +260,12 @@ install_python() {
   log "installing the MetaTrader5 Python package"
   notice install "Step 4 of 4: installing the MetaTrader5 Python package"
   timeout 900 wine "$python_dir/python.exe" -m pip install --no-cache-dir \
-    --disable-pip-version-check --no-warn-script-location --only-binary=:all: MetaTrader5 ||
+    --disable-pip-version-check --no-warn-script-location --upgrade --only-binary=:all: MetaTrader5 ||
     fail "the MetaTrader5 Python package couldn't be installed"
   versions="$(wine "$python_dir/python.exe" -I -c \
     'import platform, MetaTrader5, numpy; print(f"Python {platform.python_version()}, MetaTrader5 {MetaTrader5.__version__}, numpy {numpy.__version__}")' \
     | tr -d '\r')" || fail "the MetaTrader5 Python package couldn't be imported"
-  touch "$WINEPREFIX/.python-installed"
+  printf '%s\n' "$python_version" > "$WINEPREFIX/.python-installed"
   log "step 4 of 4 done in $((SECONDS - started)) s: $versions"
 }
 
@@ -337,8 +344,7 @@ link_mounts() {
 }
 
 if [[ ! -f "$WINEPREFIX/.prefix-ready" || ! -f "$WINEPREFIX/.webview2-installed" ||
-  ! -f "$WINEPREFIX/.mt5-installed" ||
-  ( "${MT_PYTHON:-}" == true && ! -f "$WINEPREFIX/.python-installed" ) ]]; then
+  ! -f "$WINEPREFIX/.mt5-installed" ]] || ! python_ready; then
   started=$SECONDS
   tmp="$(mktemp -d)"
   # Wine reports dozens of harmless errors while it builds the prefix and the
@@ -351,9 +357,7 @@ if [[ ! -f "$WINEPREFIX/.prefix-ready" || ! -f "$WINEPREFIX/.webview2-installed"
   [[ -f "$WINEPREFIX/.prefix-ready" ]] || prepare_prefix
   [[ -f "$WINEPREFIX/.webview2-installed" ]] || install_webview2
   [[ -f "$WINEPREFIX/.mt5-installed" ]] || install_mt
-  if [[ "${MT_PYTHON:-}" == true && ! -f "$WINEPREFIX/.python-installed" ]]; then
-    install_python
-  fi
+  python_ready || install_python
   export WINEDEBUG="$wine_debug"
   rm -rf "$tmp"
   tmp=

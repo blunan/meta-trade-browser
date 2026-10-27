@@ -27,7 +27,7 @@
 
 ## Python
 
-With `MT_PYTHON=true` (see [Folders and settings](settings.md#the-main-settings)), the next start downloads the 64-bit Windows Python installer, checks the Python Software Foundation's signature, installs Python and MetaQuotes' [`MetaTrader5` package](https://www.mql5.com/en/docs/python_metatrader5) (`MetaTrader5` and `numpy`) into `/config`, and sets the Python path in **Tools → Options → Compilers**.
+With `MT_PYTHON=true` (see [Folders and settings](settings.md#the-main-settings)), the next start downloads the 64-bit Windows Python 3.14 installer, checks the Python Software Foundation's signature, installs Python and MetaQuotes' [`MetaTrader5` package](https://www.mql5.com/en/docs/python_metatrader5) (`MetaTrader5` and `numpy`) into `/config`, and sets the Python path in **Tools → Options → Compilers**. When a new image brings a newer Python 3.14 release, the next start upgrades Python and `MetaTrader5` in place.
 
 - **From a chart or MetaEditor:** `.py` scripts in `MQL5/Scripts` or `MQL5/Experts` (including `/mql5/Scripts` under *Scripts → Mounted* in the Navigator) run when dragged onto a chart, or with F5/F7 in MetaEditor. Their output appears in the *Experts* tab of the Toolbox.
 - **Trading from Python:** by default, **Disable algorithmic trading via external Python API** under **Tools → Options → Experts** is on, so Python scripts can read market and account data (`initialize`, `symbol_info_tick`, `copy_rates_from_pos`, `account_info`, `positions_get`) but cannot place orders. Untick it, with **Allow algorithmic trading** on, when a Python script needs `order_send`.

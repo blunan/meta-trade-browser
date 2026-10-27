@@ -44,6 +44,12 @@
       "prBodyNotes": [
         "CI doesn't install MetaTrader, so check this Wine before merging: build this branch and start it with `tests/compose.dev.yaml`. The log should show both `signature ok` lines and `starting MetaTrader`, and the container should turn `healthy`. With a demo account logged in, MetaTrader should log back in after each of a few restarts."
       ]
+    },
+    {
+      "description": "Windows Python in run-terminal.sh stays on 3.14, the newest series MetaQuotes publishes a MetaTrader5 wheel for. Its patch releases join Monday's minor and patch PR.",
+      "matchDatasources": ["github-tags"],
+      "matchDepNames": ["python/cpython"],
+      "allowedVersions": "/^3\\.14\\.\\d+$/"
     }
   ],
   "customManagers": [
