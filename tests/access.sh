@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Access-layer tests for the metatrader-docker image, and T21: the window the desktop
-# shows while MetaTrader can't start.
+# Access-layer tests for the metatrader-docker image, T21: the window the desktop
+# shows while MetaTrader can't start, and the installers' signature check
+# refusing an unsigned file.
 #
 # Each configuration runs the image on an internal Docker network, which has
 # no internet: MetaTrader's first-start downloads fail at once, and the access layer
@@ -316,6 +317,17 @@ refused "T10: SELKIES_FILE_TRANSFERS=none|locked" "SELKIES_FILE_TRANSFERS must b
 refused "T10: SELKIES_CLIPBOARD_ENABLED=off" "SELKIES_CLIPBOARD_ENABLED must be" "${with_password[@]}" -e SELKIES_CLIPBOARD_ENABLED=off
 refusals_checked
 
+echo "The installers' signature check"
+# Offline, a file with no signature is refused before any download.
+rc=0
+out="$(docker exec "$run-probe" /opt/mt/verify-signature.sh python /etc/hostname 2>&1)" || rc=$?
+check "Signature check: an unsigned file is refused as Python's installer" 1 "$rc"
+check_true "Signature check: ...because it isn't signed through Microsoft's ID Verified code signing" grep -qF \
+  "REFUSED: hostname has no signature through Microsoft's ID Verified code signing" <<< "$out"
+rc=0
+docker exec "$run-probe" /opt/mt/verify-signature.sh pip /etc/hostname > /dev/null 2>&1 || rc=$?
+check "Signature check: an unknown kind is a usage error" 2 "$rc"
+
 echo "Defaults (T2, T3, T5-T8, T13, T14, T16, T17, T19-T21)"
 start "$net" main "${with_password[@]}"
 if ready main; then
@@ -422,6 +434,10 @@ if ready main; then
     logged main "Retrying in 60 s" && break
     sleep 1
   done
+  check_true "MT_PYTHON unset: three install steps" logged main "step 2 of 3: Microsoft Edge WebView2"
+  check_true "MT_PYTHON unset: the log says Python: off" logged main "Python: off."
+  check "the first install is marked as under way" yes \
+    "$(docker exec "$run-main" sh -c '[ -f /config/.wine/.installing ] && echo yes || echo no')"
   check "T21: the startup window: one, framed like MetaTrader's windows, not filling the screen, centred" \
     "1 framed small centred" "$(notice_window main)"
   # The size changes the way the desktop sets it, as when a browser connects.
@@ -613,6 +629,11 @@ if ready sub; then
     "$(code -u "$user:$password" -X POST -H "Origin: https://$t" -F 'file=@/etc/hostname' "https://$t/mt/api/upload")"
   check_true "T8: the log says file transfers: none" logged sub "File transfers: none."
   check_true "MT_PYTHON=true is logged" logged sub "Python: on (MT_PYTHON=true)."
+  for _ in $(seq 1 60); do
+    logged sub "step 1 of 4: creating the Wine prefix" && break
+    sleep 1
+  done
+  check_true "MT_PYTHON=true: four install steps" logged sub "step 1 of 4: creating the Wine prefix"
   check_true "SELKIES_COMMAND_ENABLED=true is warned about" logged sub "WARNING: SELKIES_COMMAND_ENABLED=true"
 fi
 docker rm -f "$run-sub" > /dev/null

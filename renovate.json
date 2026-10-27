@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Update PRs for the base image's digest, Wine, the workflows' actions, and the cosign and Trivy versions. On Monday mornings the workflows' actions, runners and Python version come together in one PR, Wine comes in its own, and the other minor and patch updates in a third. Actions stay pinned to commit SHAs. Nothing merges by itself, and Renovate never asks GitHub to auto-merge. When a setting here is renamed or deprecated, Renovate opens a PR that migrates this file.",
+  "description": "Update PRs for the base image's digest, Wine, Windows Python (MT_PYTHON), the workflows' actions, and the cosign and Trivy versions. On Monday mornings the workflows' actions, runners and the docs build's Python version come together in one PR, Wine comes in its own, and the other minor and patch updates, Windows Python's among them, in a third. Actions stay pinned to commit SHAs. Nothing merges by itself, and Renovate never asks GitHub to auto-merge. When a setting here is renamed or deprecated, Renovate opens a PR that migrates this file.",
   "extends": [
     "config:recommended",
     ":configMigration"
@@ -46,10 +46,13 @@
       ]
     },
     {
-      "description": "Windows Python in run-terminal.sh stays on 3.14, the newest series MetaQuotes publishes a MetaTrader5 wheel for. Its patch releases join Monday's minor and patch PR.",
+      "description": "Windows Python in run-terminal.sh stays on 3.14, the newest series MetaQuotes publishes a MetaTrader5 wheel for. Its patch releases join Monday's minor and patch PR. CI doesn't install Python, so the PR says how to check it by hand.",
       "matchDatasources": ["github-tags"],
       "matchDepNames": ["python/cpython"],
-      "allowedVersions": "/^3\\.14\\.\\d+$/"
+      "allowedVersions": "/^3\\.14\\.\\d+$/",
+      "prBodyNotes": [
+        "CI doesn't install Python, so check the new Python before merging: build this branch and start it with `tests/compose.dev.yaml` and `MT_PYTHON=true`, on a `dev/data` that has the previous Python. The log should show the Python Software Foundation's `signature ok` line, `step 4 of 4 done` with the new version and `starting MetaTrader`, and the container should turn `healthy`."
+      ]
     }
   ],
   "customManagers": [

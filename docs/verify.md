@@ -36,8 +36,8 @@ For networks that filter outgoing traffic:
 | First start | `download.mql5.com` | The MetaTrader installer, and the files it installs |
 | First start | `crl3.digicert.com` | A revocation list, for the MetaTrader installer's signature check |
 | First start | `content.finteza.com` | MetaQuotes' analytics service, contacted by the MetaTrader installer |
-| First start, when `MT_PYTHON=true` | `www.python.org` | The Windows Python installer |
-| First start, when `MT_PYTHON=true` | `pypi.org`, `files.pythonhosted.org` | The `MetaTrader5` and `numpy` wheels |
+| When `MT_PYTHON=true` installs or upgrades Python | `www.python.org`, `www.microsoft.com` | The Windows Python installer, and revocation lists for its signature check |
+| When `MT_PYTHON=true` installs or upgrades Python | `pypi.org`, `files.pythonhosted.org` | The `MetaTrader5` and `numpy` packages |
 | From the first start on | `download.terminal.free` | LiveUpdate, MetaTrader's own updates |
 | Once you log in | your broker's servers | Trading, and LiveUpdate through them |
 | When you use them | MetaQuotes' MQL5 services | Market, Signals, Code Base and the like |

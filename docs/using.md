@@ -27,13 +27,18 @@
 
 ## Python
 
-With `MT_PYTHON=true` (see [Folders and settings](settings.md#the-main-settings)), the next start downloads the 64-bit Windows Python 3.14 installer, checks the Python Software Foundation's signature, installs Python and MetaQuotes' [`MetaTrader5` package](https://www.mql5.com/en/docs/python_metatrader5) (`MetaTrader5` and `numpy`) into `/config`, and sets the Python path in **Tools → Options → Compilers**. When a new image brings a newer Python 3.14 release, the next start upgrades Python and `MetaTrader5` in place.
+With `MT_PYTHON=true` (see [Folders and settings](settings.md#the-main-settings)), the next start installs Windows Python 3.14 and MetaQuotes' [`MetaTrader5` package](https://www.mql5.com/en/docs/python_metatrader5) into `/config`. It downloads Python's 64-bit installer from python.org, and runs it only if the Python Software Foundation's signature checks out. Then pip installs `MetaTrader5`, and `numpy`, the one package it needs, from PyPI over HTTPS: those have no signature to check. This takes under a minute, and adds about 130 MB to `/config`. MetaTrader and MetaEditor find Python by themselves: MetaEditor shows its folder under **Tools → Options → Compilers**.
 
-- **From a chart or MetaEditor:** `.py` scripts in `MQL5/Scripts` or `MQL5/Experts` (including `/mql5/Scripts` under *Scripts → Mounted* in the Navigator) run when dragged onto a chart, or with F5/F7 in MetaEditor. Their output appears in the *Experts* tab of the Toolbox.
-- **Trading from Python:** by default, **Disable algorithmic trading via external Python API** under **Tools → Options → Experts** is on, so Python scripts can read market and account data (`initialize`, `symbol_info_tick`, `copy_rates_from_pos`, `account_info`, `positions_get`) but cannot place orders. Untick it, with **Allow algorithmic trading** on, when a Python script needs `order_send`.
-- **From `docker exec`:** to run a script or install another wheel into `/config`:
+- **On a chart:** a `.py` script in `MQL5/Scripts`, or in the EA folder's `Scripts` (*Scripts → Mounted* in the Navigator), runs on a chart when you double-click it or drag it onto one. What it prints appears in the Toolbox's *Experts* tab.
+- **The `MetaTrader5` package** connects to MetaTrader once MetaTrader has logged in to a trading account. Before the first login, `initialize()` fails with `(-10005, 'IPC timeout')`.
+- **Trading from Python:** with the quick start's [step 6](quick-start.md#6-set-up-metatrader) settings, **Disable algorithmic trading via external Python API** is on. Scripts, on a chart or through `docker exec`, can read prices and the account, but `order_send` is refused with `10027` (*AutoTrading disabled by client*), as when Algo Trading is off. Untick that option, with **Allow algorithmic trading** on, when a script needs to trade.
+- **From `docker exec`:** to run Python, or to install another package into `/config`:
 
     ```sh
-    docker exec -u abc metatrader-docker wine python -c "import MetaTrader5 as mt5; mt5.initialize(); print(mt5.terminal_info()); mt5.shutdown()"
+    docker exec -u abc metatrader-docker wine python -c "import MetaTrader5 as mt5; print(mt5.initialize(), mt5.version()); mt5.shutdown()"
     docker exec -u abc metatrader-docker wine python -m pip install --only-binary=:all: pandas
     ```
+
+- **Updates:** a new image with a newer Python 3.14 release upgrades Python and `MetaTrader5` at its first start, and going back to an older image keeps the newer Python. To follow MetaTrader's own updates in between: `docker exec -u abc metatrader-docker wine python -m pip install --upgrade MetaTrader5`.
+- **If Python can't be installed:** during MetaTrader's first install, MetaTrader waits for it, as for the other steps: the window says why, and tries again 60 s later. Later on, when you turn `MT_PYTHON` on for an account in use, or a new image brings a newer Python, MetaTrader starts all the same: the log has a `WARNING` line with the reason, and the next start tries again.
+- **Turning it off** leaves Python in `/config`, and stops its upgrades.

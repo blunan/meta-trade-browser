@@ -8,17 +8,18 @@
 # refused; 2: wrong usage.
 #   metaquotes  mt5setup.exe, against Debian's CA bundle. osslsigncode fetches
 #               DigiCert's revocation lists itself.
-#   microsoft   the WebView2 installer, against the Microsoft roots pinned in
-#               the image. Microsoft serves its revocation lists in a way
-#               osslsigncode's own download refuses, so they're fetched here.
-#   python      the Python installer, signed by the Python Software Foundation
-#               through Microsoft's Identity Verification Root CA 2020, pinned
-#               in the image, with Microsoft's revocation lists fetched here.
-# No file hash is pinned: the signature is the check, and MetaQuotes and
-# Microsoft replace their files without notice.
+#   microsoft   the WebView2 installer, against the two Microsoft roots pinned
+#               in microsoft-roots.pem. Microsoft serves its revocation lists in
+#               a way osslsigncode's own download refuses, so they're fetched here.
+#   python      the Python installer, against the Microsoft root pinned in
+#               microsoft-identity-root.pem: the Python Software Foundation signs
+#               through Microsoft's ID Verified code signing. Its revocation lists
+#               are fetched here too.
+# No file hash is pinned: the signature is the check. MetaQuotes and Microsoft
+# replace their files without notice, and Renovate moves Python's version.
 set -euo pipefail
 
-roots=/opt/mt/certs/microsoft-roots.pem
+certs=/opt/mt/certs
 microsoft_crls=http://www.microsoft.com/pkiops/crl
 
 log() { printf '%s [mt] %s\n' "$(date -u +%FT%TZ)" "$*"; }
@@ -54,6 +55,7 @@ else
   }
   if [[ "$kind" == microsoft ]]; then
     organisation="Microsoft Corporation"
+    roots="$certs/microsoft-roots.pem"
     # The signer's certificate comes through Code Signing PCA 2011 or PCA 2024
     # (newer installers), the timestamp's through Time-Stamp PCA 2010.
     crl_ok=no
@@ -64,18 +66,23 @@ else
     fi
   else
     organisation="Python Software Foundation"
+    roots="$certs/microsoft-identity-root.pem"
     # The signer's certificate comes through Identity Verification Root CA 2020,
-    # ID Verified Code Signing PCA 2021 and one of Microsoft's numbered EOC CAs
-    # (EOC CA 01, 02, ...); the timestamp's through Public RSA Timestamping CA 2020.
-    eoc_crl="$(osslsigncode extract-signature -pem -in "$file" -out "$tmp/sig.pem" > /dev/null 2>&1 &&
+    # ID Verified Code Signing PCA 2021 and one of its numbered CAs, which
+    # changes from release to release (EOC CA 03 for 3.14.9, EOC CA 04 for
+    # 3.14.10; there are AOC ones too). The signer's certificate names its CA's
+    # list. The timestamp's comes through Public RSA Timestamping CA 2020.
+    issuer_crl="$(osslsigncode extract-signature -pem -in "$file" -out "$tmp/sig.pem" > /dev/null 2>&1 &&
       openssl pkcs7 -in "$tmp/sig.pem" -print_certs -text -noout 2> /dev/null |
-      sed -n -E "s|^ *URI:$microsoft_crls/(Microsoft%20ID%20Verified%20CS%20EOC%20CA%20[0-9]{2}\\.crl)\$|\1|p" |
+      sed -n -E "s|^ *URI:$microsoft_crls/(Microsoft%20ID%20Verified%20CS%20[A-Z]{3}%20CA%20[0-9]{2}\\.crl)\$|\1|p" |
       head -n 1)" || true
+    if [[ -z "$issuer_crl" ]]; then
+      refuse "has no signature through Microsoft's ID Verified code signing, which signs Python's installers."
+    fi
     crl_ok=no
-    if [[ -n "$eoc_crl" ]] &&
-      crl 'Microsoft%20Identity%20Verification%20Root%20Certificate%20Authority%202020.crl' "$tmp/signer.crl" &&
+    if crl 'Microsoft%20Identity%20Verification%20Root%20Certificate%20Authority%202020.crl' "$tmp/signer.crl" &&
       crl 'Microsoft%20ID%20Verified%20Code%20Signing%20PCA%202021.crl' "$tmp/signer.crl" &&
-      crl "$eoc_crl" "$tmp/signer.crl" &&
+      crl "$issuer_crl" "$tmp/signer.crl" &&
       crl 'Microsoft%20Identity%20Verification%20Root%20Certificate%20Authority%202020.crl' "$tmp/timestamp.crl" &&
       crl 'Microsoft%20Public%20RSA%20Timestamping%20CA%202020.crl' "$tmp/timestamp.crl"; then
       crl_ok=yes
