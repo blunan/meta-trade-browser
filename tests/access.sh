@@ -464,10 +464,17 @@ if ready main; then
     logged main "Retrying in 60 s" && break
     sleep 1
   done
+  failures_before=$failures
   check_true "MT_PYTHON unset: three install steps" logged main "step 2 of 3: Microsoft Edge WebView2"
   check_true "MT_PYTHON unset: the log says Python: off" logged main "Python: off."
   check "the first install is marked as under way" yes \
     "$(docker exec "$run-main" sh -c '[ -f /config/.wine/.installing ] && echo yes || echo no')"
+  # run-terminal.sh's log, with Wine's own errors, which docker logs mixes
+  # with the other services' lines.
+  if (( failures > failures_before )); then
+    echo "  run-terminal.log:"
+    docker exec "$run-main" cat /config/log/mt/run-terminal.log 2>&1 | sed 's/^/    /' || true
+  fi
   check "T21: the startup window: one, framed like MetaTrader's windows, not filling the screen, centred" \
     "1 framed small centred" "$(notice_window main)"
   # The size changes the way the desktop sets it, as when a browser connects.
