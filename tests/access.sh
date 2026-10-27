@@ -602,8 +602,8 @@ if ready sidecar; then
 fi
 docker rm -f "$run-sidecar" "$run-tailnet" > /dev/null
 
-echo "SUBFOLDER=/mt/ (T12), SELKIES_FILE_TRANSFERS=false (T8), SELKIES_COMMAND_ENABLED=true (warning)"
-start "$net" sub "${with_password[@]}" -e SUBFOLDER=/mt/ -e SELKIES_FILE_TRANSFERS=false -e SELKIES_COMMAND_ENABLED=true
+echo "SUBFOLDER=/mt/ (T12), SELKIES_FILE_TRANSFERS=false (T8), MT_PYTHON=true, SELKIES_COMMAND_ENABLED=true (warning)"
+start "$net" sub "${with_password[@]}" -e SUBFOLDER=/mt/ -e SELKIES_FILE_TRANSFERS=false -e MT_PYTHON=true -e SELKIES_COMMAND_ENABLED=true
 if ready sub; then
   t="$run-sub:3001"
   check "T12: the desktop under /mt/" 200 "$(code -u "$user:$password" "https://$t/mt/")"
@@ -612,6 +612,7 @@ if ready sub; then
   check "T8: POST /api/upload with SELKIES_FILE_TRANSFERS=false" 403 \
     "$(code -u "$user:$password" -X POST -H "Origin: https://$t" -F 'file=@/etc/hostname' "https://$t/mt/api/upload")"
   check_true "T8: the log says file transfers: none" logged sub "File transfers: none."
+  check_true "MT_PYTHON=true is logged" logged sub "Python: on (MT_PYTHON=true)."
   check_true "SELKIES_COMMAND_ENABLED=true is warned about" logged sub "WARNING: SELKIES_COMMAND_ENABLED=true"
 fi
 docker rm -f "$run-sub" > /dev/null

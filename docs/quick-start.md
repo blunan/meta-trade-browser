@@ -113,7 +113,7 @@ Other ways in, such as a VPN, Tailscale or your own domain behind a reverse prox
     - **Disable algorithmic trading when the account has been changed:** on.
     - **Disable algorithmic trading when the profile has been changed:** on.
     - **Disable algorithmic trading when the charts symbol or period has been changed:** on.
-    - **Disable algorithmic trading via external Python API:** on. Nothing in this image uses MetaQuotes' Python API.
+    - **Disable algorithmic trading via external Python API:** on, unless you enabled `MT_PYTHON=true` and want Python scripts to place orders (see [Python](using.md#python)).
     - **Allow DLL imports:** off, unless an EA needs it.
     - **Allow WebRequest for listed URL:** off, unless an EA needs it.
 4. To keep memory and traffic down: **Charts → Max bars in chart:** 50000, and **Server → Enable news:** off.

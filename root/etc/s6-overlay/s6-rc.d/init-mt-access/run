@@ -410,6 +410,11 @@ if [[ "${MT_AI_AGENTS:-}" == true ]]; then
 else
   agents="off"
 fi
+if [[ "${MT_PYTHON:-}" == true ]]; then
+  python_state="on (MT_PYTHON=true)"
+else
+  python_state="off"
+fi
 transfers_shown="$transfers"
 if [[ "$transfers" != none ]]; then
   transfers_shown="$transfers, in $files"
@@ -418,5 +423,5 @@ log "Listening on https://$listen$subfolder (HTTPS only). Host networking: $host
 log "Login: user '$user', password $password_source, kept as a SHA-512 hash that only nginx can read."
 log "Certificate: $cert_source. Clients allowed: $allowed."
 log "Stream: same origin${SELKIES_ALLOWED_ORIGINS:+ and ${SELKIES_ALLOWED_ORIGINS}}; WebSockets only. Clipboard: $clipboard. File transfers: $transfers_shown."
-log "MetaTrader's AI-agent servers: $agents."
+log "MetaTrader's AI-agent servers: $agents. Python: $python_state."
 log "Health check: /healthz on /run/mt/health.sock (plain HTTP, inside the container only)."

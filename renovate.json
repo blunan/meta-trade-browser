@@ -62,6 +62,14 @@
       "matchStrings": [
         "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\s+ARG [A-Z_]+=(?<currentValue>\\S+)"
       ]
+    },
+    {
+      "customType": "regex",
+      "description": "The Windows Python version in run-terminal.sh, marked with a '# renovate:' comment.",
+      "managerFilePatterns": ["/^root/opt/mt/run-terminal\\.sh$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+) extractVersion=(?<extractVersion>\\S+)\\s+python_version=(?<currentValue>\\S+)"
+      ]
     }
   ]
 }

@@ -25,7 +25,7 @@ Then follow the [quick start](quick-start.md).
 - **ARM.** MetaTrader is a 64-bit Windows program, so the image is amd64 only.
 - **VNC.** The desktop streams to browsers only. VNC would mean a second login and a second open port.
 - **Microphone and webcam.** They're off, and untested with MetaTrader.
-- **Python.** There's no Python bridge or API for MetaTrader. Selkies, the desktop's streaming server, is itself a Python program; it listens only on a socket file inside the container.
+- **A Python network bridge.** With `MT_PYTHON=true`, Windows Python and MetaQuotes' `MetaTrader5` package are installed inside the container so `.py` scripts run from charts, MetaEditor or `docker exec` (see [Python](using.md#python)), but nothing exposes the Python API over the network. Selkies, the desktop's streaming server, is itself a Python program; it listens only on a socket file inside the container.
 - **`init: true`, or `docker run --init`.** The image's own supervisor (s6) has to be process 1: with Docker's init, the container stops at once.
 - **EAs that need .NET.** Wine's Mono isn't included.
 - **Wayland and WebRTC.** The desktop runs X11 and streams over WebSockets; the startup check refuses the alternatives.

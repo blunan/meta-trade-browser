@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
-# verify-signature.sh metaquotes|microsoft <file>
+# verify-signature.sh metaquotes|microsoft|python <file>
 #
 # Checks an installer's Authenticode signature before it runs. It passes only
 # when osslsigncode verifies the primary signature, timestamp and revocation
-# lists included, and the signer's organisation is exactly MetaQuotes Ltd or
-# Microsoft Corporation. Exit code 0: passed; 1: refused; 2: wrong usage.
+# lists included, and the signer's organisation is exactly MetaQuotes Ltd,
+# Microsoft Corporation or Python Software Foundation. Exit code 0: passed; 1:
+# refused; 2: wrong usage.
 #   metaquotes  mt5setup.exe, against Debian's CA bundle. osslsigncode fetches
 #               DigiCert's revocation lists itself.
-#   microsoft   the WebView2 installer, against the two Microsoft roots pinned
-#               in the image. Microsoft serves its revocation lists in a way
+#   microsoft   the WebView2 installer, against the Microsoft roots pinned in
+#               the image. Microsoft serves its revocation lists in a way
 #               osslsigncode's own download refuses, so they're fetched here.
+#   python      the Python installer, signed by the Python Software Foundation
+#               through Microsoft's Identity Verification Root CA 2020, pinned
+#               in the image, with Microsoft's revocation lists fetched here.
 # No file hash is pinned: the signature is the check, and MetaQuotes and
 # Microsoft replace their files without notice.
 set -euo pipefail
@@ -23,8 +27,8 @@ refuse() {
   exit 1
 }
 
-if (( $# != 2 )) || [[ "$1" != metaquotes && "$1" != microsoft ]]; then
-  echo "Usage: verify-signature.sh metaquotes|microsoft <file>" >&2
+if (( $# != 2 )) || [[ "$1" != metaquotes && "$1" != microsoft && "$1" != python ]]; then
+  echo "Usage: verify-signature.sh metaquotes|microsoft|python <file>" >&2
   exit 2
 fi
 kind="$1"
@@ -43,17 +47,41 @@ if [[ "$kind" == metaquotes ]]; then
   organisation="MetaQuotes Ltd"
   args+=(-CAfile /etc/ssl/certs/ca-certificates.crt)
 else
-  organisation="Microsoft Corporation"
-  # The signer's certificate comes through Code Signing PCA 2011 or PCA 2024
-  # (newer installers), the timestamp's through Time-Stamp PCA 2010.
   crl() {
     curl -fsS --retry 3 --retry-all-errors --retry-delay 5 --connect-timeout 30 --max-time 120 \
       -o "$tmp/crl.der" "$microsoft_crls/$1" &&
       openssl crl -inform DER -in "$tmp/crl.der" >> "$2"
   }
-  if ! { crl MicCodSigPCA2011_2011-07-08.crl "$tmp/signer.crl" &&
-    crl 'Microsoft%20Code%20Signing%20PCA%202024.crl' "$tmp/signer.crl" &&
-    crl 'Microsoft%20Time-Stamp%20PCA%202010(1).crl' "$tmp/timestamp.crl"; }; then
+  if [[ "$kind" == microsoft ]]; then
+    organisation="Microsoft Corporation"
+    # The signer's certificate comes through Code Signing PCA 2011 or PCA 2024
+    # (newer installers), the timestamp's through Time-Stamp PCA 2010.
+    crl_ok=no
+    if crl MicCodSigPCA2011_2011-07-08.crl "$tmp/signer.crl" &&
+      crl 'Microsoft%20Code%20Signing%20PCA%202024.crl' "$tmp/signer.crl" &&
+      crl 'Microsoft%20Time-Stamp%20PCA%202010(1).crl' "$tmp/timestamp.crl"; then
+      crl_ok=yes
+    fi
+  else
+    organisation="Python Software Foundation"
+    # The signer's certificate comes through Identity Verification Root CA 2020,
+    # ID Verified Code Signing PCA 2021 and one of Microsoft's numbered EOC CAs
+    # (EOC CA 01, 02, ...); the timestamp's through Public RSA Timestamping CA 2020.
+    eoc_crl="$(osslsigncode extract-signature -pem -in "$file" -out "$tmp/sig.pem" > /dev/null 2>&1 &&
+      openssl pkcs7 -in "$tmp/sig.pem" -print_certs -text -noout 2> /dev/null |
+      sed -n -E "s|^ *URI:$microsoft_crls/(Microsoft%20ID%20Verified%20CS%20EOC%20CA%20[0-9]{2}\\.crl)\$|\1|p" |
+      head -n 1)" || true
+    crl_ok=no
+    if [[ -n "$eoc_crl" ]] &&
+      crl 'Microsoft%20Identity%20Verification%20Root%20Certificate%20Authority%202020.crl' "$tmp/signer.crl" &&
+      crl 'Microsoft%20ID%20Verified%20Code%20Signing%20PCA%202021.crl' "$tmp/signer.crl" &&
+      crl "$eoc_crl" "$tmp/signer.crl" &&
+      crl 'Microsoft%20Identity%20Verification%20Root%20Certificate%20Authority%202020.crl' "$tmp/timestamp.crl" &&
+      crl 'Microsoft%20Public%20RSA%20Timestamping%20CA%202020.crl' "$tmp/timestamp.crl"; then
+      crl_ok=yes
+    fi
+  fi
+  if [[ "$crl_ok" != yes ]]; then
     refuse "can't be checked: Microsoft's revocation lists couldn't be fetched from $microsoft_crls/."
   fi
   # -ignore-cdp: only these lists, no download attempts of osslsigncode's own.

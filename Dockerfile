@@ -171,19 +171,22 @@ COPY root/ /
 RUN /usr/bin/python3 -I -c 'import gi; gi.require_version("Gtk", "3.0"); from gi.repository import Gtk' && \
     /usr/bin/python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' /opt/mt/notice.py
 
-# The WebView2 installer is verified against exactly these two Microsoft roots:
-# Root Certificate Authority 2011 (code signing) and 2010 (timestamps).
+# The WebView2 and Python installers are verified against exactly these three
+# Microsoft roots: Root Certificate Authority 2011 (WebView2 code signing),
+# 2010 (WebView2 timestamps) and Identity Verification Root Certificate
+# Authority 2020 (Python Software Foundation code signing and timestamps).
 RUN <<'EOF'
 #!/bin/bash
 set -euo pipefail
 pem=/opt/mt/certs/microsoft-roots.pem
 expected='847DF6A78497943F27FC72EB93F9A637320A02B561D0A91B09E87A7807ED7C61
-DF545BF919A2439C36983B54CDFC903DFA4F37D3996D8D84B4C31EEC6F3C163E'
+DF545BF919A2439C36983B54CDFC903DFA4F37D3996D8D84B4C31EEC6F3C163E
+5367F20C7ADE0E2BCA790915056D086B720C33C1FA2A2661ACF787E3292E1270'
 if grep -v -E '^(-----(BEGIN|END) CERTIFICATE-----|[A-Za-z0-9+/=]+)$' "$pem"; then
   echo "$pem holds more than certificates" >&2
   exit 1
 fi
-test "$(grep -c -- '-----BEGIN CERTIFICATE-----' "$pem")" -eq 2
+test "$(grep -c -- '-----BEGIN CERTIFICATE-----' "$pem")" -eq 3
 tmp="$(mktemp -d)"
 awk -v d="$tmp" '/-----BEGIN CERTIFICATE-----/ { n++ } n { print > (d "/" n ".pem") }' "$pem"
 actual="$(for f in "$tmp"/*.pem; do openssl x509 -in "$f" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d :; done | sort)"

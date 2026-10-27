@@ -4,17 +4,20 @@
 # (RESTART_APP=true). The autostart runs it without exec, so the watchdog keeps
 # seeing its "sh .../autostart" process while MetaTrader runs.
 #
-# The first start installs three things, in order. Each leaves a marker file in
-# $WINEPREFIX, so a restart resumes where the last attempt stopped:
+# The first start installs three things, in order (four when MT_PYTHON=true).
+# Each leaves a marker file in $WINEPREFIX, so a restart resumes where the last
+# attempt stopped:
 #   1. the Wine prefix (.prefix-ready);
 #   2. Microsoft Edge WebView2, which MetaTrader's HTML panes use, once Microsoft's
 #      signature passes (.webview2-installed);
-#   3. MetaTrader, once MetaQuotes' signature passes (.mt5-installed).
-# A failed step is retried 60 s later, and MetaTrader doesn't start before all three
-# are done. Otherwise MetaEditor would install WebView2 by itself, unchecked.
+#   3. MetaTrader, once MetaQuotes' signature passes (.mt5-installed);
+#   4. when MT_PYTHON=true, Windows Python and the MetaTrader5 package, once the
+#      Python Software Foundation's signature passes (.python-installed).
+# A failed step is retried 60 s later, and MetaTrader doesn't start before every
+# step is done. Otherwise MetaEditor would install WebView2 by itself, unchecked.
 #
-# Every start then sets Edge's Windows version and MetaTrader's AI-agent servers,
-# links the /mql5 mount, and runs MetaTrader in the foreground.
+# Every start then sets Edge's Windows version, MetaTrader's Python path and
+# AI-agent servers, links the /mql5 mount, and runs MetaTrader in the foreground.
 #
 # While it installs, or a step fails, a window on the desktop (notice.py) shows
 # the step it's on, or why it failed and when it tries again.
@@ -28,13 +31,22 @@ export WINEPREFIX="${WINEPREFIX:-/config/.wine}"
 export WINEDLLOVERRIDES="${WINEDLLOVERRIDES-mscoree,mshtml=}"
 mt_dir="$WINEPREFIX/drive_c/Program Files/MetaTrader 5"
 webview2_dir="$WINEPREFIX/drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application"
+# renovate: datasource=github-tags depName=python/cpython extractVersion=^v(?<version>\d+\.\d+\.\d+)$
+python_version=3.14.10
+python_series="${python_version%.*}"
+python_dir="$WINEPREFIX/drive_c/Program Files/Python${python_series//./}"
 mt_url=https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe
 # The URL MetaQuotes' own Linux installer, mt5linux.sh, uses.
 webview2_url=https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/f2910a1e-e5a6-4f17-b52d-7faf525d17f8/MicrosoftEdgeWebview2Setup.exe
+python_url="https://www.python.org/ftp/python/$python_version/python-$python_version-amd64.exe"
 # MetaTrader's process as Wine shows it: the Windows path of terminal64.exe first.
 mt_process='^[A-Za-z]:\\.*\\terminal64\.exe( |$)'
 log_file=/config/log/mt/run-terminal.log
 retry_delay=60
+steps=3
+if [[ "${MT_PYTHON:-}" == true ]]; then
+  steps=4
+fi
 
 # One log: svc-mt-log copies this file into docker logs. When openbox starts
 # this script, its output would otherwise go to /dev/null.
@@ -140,14 +152,29 @@ webview2_version() {
   basename "$(dirname "${exes[0]}")"
 }
 
+# python_compiler_path: sets MetaTrader's and MetaEditor's Python folder
+# (Tools -> Options -> Compilers) when Python is installed and none is set yet.
+python_compiler_path() {
+  if [[ ! -f "$WINEPREFIX/.python-installed" ]] ||
+    [[ -n "$(reg_sz 'Software\\MetaQuotes Software\\Compilers' PythonPath)" ]]; then
+    return 0
+  fi
+  local exes=("$WINEPREFIX/drive_c/Program Files"/Python*/python.exe) folder
+  [[ -f "${exes[0]}" ]] || return 1
+  folder="C:\\Program Files\\$(basename "$(dirname "${exes[0]}")")"
+  wine reg add 'HKCU\Software\MetaQuotes Software\Compilers' /v PythonPath /t REG_SZ /d "$folder" /f > /dev/null ||
+    return 1
+  log "MetaTrader's Python compiler path: $folder"
+}
+
 prepare_prefix() {
   local started=$SECONDS
-  notice install "Step 1 of 3: setting up Wine"
+  notice install "Step 1 of $steps: setting up Wine"
   if [[ -f "$WINEPREFIX/.mt5-installed" ]]; then
     # From an earlier version of this image, which marked only the MetaTrader install.
-    log "step 1 of 3: the Wine prefix already holds MetaTrader; keeping it as it is"
+    log "step 1 of $steps: the Wine prefix already holds MetaTrader; keeping it as it is"
   else
-    log "step 1 of 3: creating the Wine prefix"
+    log "step 1 of $steps: creating the Wine prefix"
     wineboot -i || fail "the Wine prefix couldn't be created"
     # A crash ends the program, and the watchdog restarts it, instead of
     # leaving a dialog that waits for a click.
@@ -163,19 +190,19 @@ prepare_prefix() {
     wineserver -w
   fi
   touch "$WINEPREFIX/.prefix-ready"
-  log "step 1 of 3 done in $((SECONDS - started)) s"
+  log "step 1 of $steps done in $((SECONDS - started)) s"
 }
 
 install_webview2() {
   local started=$SECONDS rc=0 setup="$tmp/MicrosoftEdgeWebview2Setup.exe" _
-  log "step 2 of 3: Microsoft Edge WebView2, for MetaTrader's and MetaEditor's HTML panes"
-  notice install "Step 2 of 3: downloading Microsoft Edge WebView2"
+  log "step 2 of $steps: Microsoft Edge WebView2, for MetaTrader's and MetaEditor's HTML panes"
+  notice install "Step 2 of $steps: downloading Microsoft Edge WebView2"
   download "$webview2_url" "$setup" || fail "the WebView2 download failed"
-  notice install "Step 2 of 3: checking Microsoft's signature"
+  notice install "Step 2 of $steps: checking Microsoft's signature"
   /opt/mt/verify-signature.sh microsoft "$setup" ||
     fail "the WebView2 installer didn't pass its signature check, so it wasn't run"
   log "installing WebView2"
-  notice install "Step 2 of 3: installing Microsoft Edge WebView2"
+  notice install "Step 2 of $steps: installing Microsoft Edge WebView2"
   timeout 900 wine "$setup" /silent /install || rc=$?
   log "the WebView2 installer exited with code $rc"
   # Edge Update installs the runtime, and then keeps running. So from here on,
@@ -186,19 +213,19 @@ install_webview2() {
   done
   webview2_version > /dev/null || fail "WebView2 wasn't installed within 5 minutes"
   touch "$WINEPREFIX/.webview2-installed"
-  log "step 2 of 3 done in $((SECONDS - started)) s: WebView2 $(webview2_version)"
+  log "step 2 of $steps done in $((SECONDS - started)) s: WebView2 $(webview2_version)"
 }
 
 install_mt() {
   local started=$SECONDS rc=0 setup="$tmp/mt5setup.exe" file
-  log "step 3 of 3: MetaTrader"
-  notice install "Step 3 of 3: downloading MetaTrader"
+  log "step 3 of $steps: MetaTrader"
+  notice install "Step 3 of $steps: downloading MetaTrader"
   download "$mt_url" "$setup" || fail "the MetaTrader download failed"
-  notice install "Step 3 of 3: checking MetaQuotes' signature"
+  notice install "Step 3 of $steps: checking MetaQuotes' signature"
   /opt/mt/verify-signature.sh metaquotes "$setup" ||
     fail "the MetaTrader installer didn't pass its signature check, so it wasn't run"
   log "installing MetaTrader"
-  notice install "Step 3 of 3: installing MetaTrader"
+  notice install "Step 3 of $steps: installing MetaTrader"
   timeout 900 wine "$setup" /auto || rc=$?
   # It exits with 1 even when it succeeds, so its files decide.
   log "the MetaTrader installer exited with code $rc"
@@ -206,7 +233,33 @@ install_mt() {
     [[ -f "$mt_dir/$file" ]] || fail "the MetaTrader install is incomplete: $file is missing"
   done
   touch "$WINEPREFIX/.mt5-installed"
-  log "step 3 of 3 done in $((SECONDS - started)) s"
+  log "step 3 of $steps done in $((SECONDS - started)) s"
+}
+
+install_python() {
+  local started=$SECONDS setup="$tmp/python-$python_version-amd64.exe" versions
+  log "step 4 of 4: Python $python_version and the MetaTrader5 library (MT_PYTHON=true)"
+  notice install "Step 4 of 4: downloading Python $python_version"
+  download "$python_url" "$setup" || fail "the Python download failed"
+  notice install "Step 4 of 4: checking the Python Software Foundation's signature"
+  /opt/mt/verify-signature.sh python "$setup" ||
+    fail "the Python installer didn't pass its signature check, so it wasn't run"
+  log "installing Python $python_version"
+  notice install "Step 4 of 4: installing Python $python_version"
+  timeout 900 wine "$setup" /quiet InstallAllUsers=1 PrependPath=1 \
+    Include_launcher=0 Include_test=0 Include_doc=0 Include_tcltk=0 ||
+    fail "the Python installer failed"
+  [[ -f "$python_dir/python.exe" ]] || fail "the Python install is incomplete: python.exe is missing"
+  log "installing the MetaTrader5 Python package"
+  notice install "Step 4 of 4: installing the MetaTrader5 Python package"
+  timeout 900 wine "$python_dir/python.exe" -m pip install --no-cache-dir \
+    --disable-pip-version-check --no-warn-script-location --only-binary=:all: MetaTrader5 ||
+    fail "the MetaTrader5 Python package couldn't be installed"
+  versions="$(wine "$python_dir/python.exe" -I -c \
+    'import platform, MetaTrader5, numpy; print(f"Python {platform.python_version()}, MetaTrader5 {MetaTrader5.__version__}, numpy {numpy.__version__}")' \
+    | tr -d '\r')" || fail "the MetaTrader5 Python package couldn't be imported"
+  touch "$WINEPREFIX/.python-installed"
+  log "step 4 of 4 done in $((SECONDS - started)) s: $versions"
 }
 
 # MetaTrader's and MetaEditor's AI-agent (MCP) servers listen on 127.0.0.1:22346 and
@@ -284,7 +337,8 @@ link_mounts() {
 }
 
 if [[ ! -f "$WINEPREFIX/.prefix-ready" || ! -f "$WINEPREFIX/.webview2-installed" ||
-  ! -f "$WINEPREFIX/.mt5-installed" ]]; then
+  ! -f "$WINEPREFIX/.mt5-installed" ||
+  ( "${MT_PYTHON:-}" == true && ! -f "$WINEPREFIX/.python-installed" ) ]]; then
   started=$SECONDS
   tmp="$(mktemp -d)"
   # Wine reports dozens of harmless errors while it builds the prefix and the
@@ -297,6 +351,9 @@ if [[ ! -f "$WINEPREFIX/.prefix-ready" || ! -f "$WINEPREFIX/.webview2-installed"
   [[ -f "$WINEPREFIX/.prefix-ready" ]] || prepare_prefix
   [[ -f "$WINEPREFIX/.webview2-installed" ]] || install_webview2
   [[ -f "$WINEPREFIX/.mt5-installed" ]] || install_mt
+  if [[ "${MT_PYTHON:-}" == true && ! -f "$WINEPREFIX/.python-installed" ]]; then
+    install_python
+  fi
   export WINEDEBUG="$wine_debug"
   rm -rf "$tmp"
   tmp=
@@ -304,6 +361,7 @@ if [[ ! -f "$WINEPREFIX/.prefix-ready" || ! -f "$WINEPREFIX/.webview2-installed"
 fi
 
 edge_as_win11 || log "WARNING: Edge's Windows version couldn't be set, so the HTML panes may stay blank"
+python_compiler_path || log "WARNING: MetaTrader's Python compiler path couldn't be set"
 set_ai_agents || fail "MetaTrader's AI-agent servers couldn't be set in Config/assistant.ini"
 link_mounts
 # The window stays until MetaTrader's own appears, at most 60 s, so the desktop
