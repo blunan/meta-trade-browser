@@ -1,8 +1,4 @@
-# Builds, tests and scans the image on every PR. On main it also pushes the
-# tested image to GHCR, signs its digest with cosign (keyless, as this
-# workflow), and only then tags it. "Image tests" is a required check, so it
-# reports on every PR; when a PR doesn't touch the image, it skips the image's
-# steps and passes in seconds.
+# Builds, tests, and scans image on PRs. On main, pushes to GHCR and signs with Cosign.
 name: image
 
 on:
@@ -15,8 +11,7 @@ on:
       - .trivyignore.yaml
       - .github/workflows/image.yml
   pull_request:
-  # No schedule and no manual runs: the image changes only through a merged
-  # PR, such as Renovate's base-image updates, which also bring Debian's fixes.
+  # Triggers only on PRs and main pushes (no scheduled runs).
 
 permissions: {}
 
@@ -70,8 +65,7 @@ jobs:
             echo "This PR doesn't change the image, so its build, tests and scan are skipped." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      # The image takes about 10 GB while it builds. Runners now have far more
-      # free, and the cleanup took up to 2 minutes, so it runs only when they don't.
+      # Clean runner disk space if available space is below 30 GB.
       - name: Free disk space, if needed
         if: steps.changes.outputs.image == 'true'
         run: |
@@ -97,11 +91,7 @@ jobs:
           echo "version=$(date -u +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
-      # The runner's own Docker can lag behind: in October 2026 it was 29.4.2,
-      # whose seccomp profile blocks the socket calls of 32-bit programs, so Wine
-      # couldn't create its prefix. The tests run on this Docker Engine instead,
-      # started next to the runner's. DOCKER_HOST points every later step at it,
-      # Trivy too.
+      # Run pinned Docker Engine side-by-side with runner daemon.
       - uses: docker/setup-docker-action@2bf61fb9464cc67f0cbdeabed6aa0380accd1c70 # v5.5.0
         if: steps.changes.outputs.image == 'true'
         with:
@@ -111,7 +101,7 @@ jobs:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         if: steps.changes.outputs.image == 'true'
 
-      # The publish job rebuilds from this build's cache.
+      # Build and cache image for test job.
       - name: Build
         if: steps.changes.outputs.image == 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -208,8 +198,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The same build, from the test job's cache, pushed by digest: no tag
-      # points to it until it's checked and signed.
+      # Push image by digest before signing.
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -224,9 +213,7 @@ jobs:
             IMAGE_REVISION=${{ github.sha }}
             IMAGE_CREATED=${{ needs.test.outputs.created }}
 
-      # GHCR counts every read of a manifest as a download, so from here on the
-      # job reads the image's index and its amd64 manifest once each, through
-      # the registry's API, and nothing else: no inspect, no verify, no copy.
+      # Verify pushed image layers match tested image via registry manifest.
       - name: The pushed image is the tested one
         working-directory: ${{ runner.temp }}
         env:
@@ -257,19 +244,13 @@ jobs:
         with:
           cosign-release: ${{ env.COSIGN_VERSION }}
 
-      # A signature that can't be made or stored fails here. Checking it again
-      # with cosign verify would only re-read what was just written.
+      # Keyless signing via GitHub Actions OIDC identity.
       - name: Sign the digest
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: cosign sign --yes "$IMAGE@$DIGEST"
 
-      # latest moves; a date tag never does. A date tag is YYYYMMDD.N, N one
-      # more than the day's highest, so every one has two numbers: update
-      # tools such as WUD only compare tags with as many numbers as the one
-      # running. sha-<commit> names the first build of that commit. Existing
-      # tags come from the tag list, and each tag is a push of the index read
-      # above, so no other build is read.
+      # Tag with latest, unique date tag (YYYYMMDD.N), and sha-<commit>.
       - name: Tag
         working-directory: ${{ runner.temp }}
         env:

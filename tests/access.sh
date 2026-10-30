@@ -1,19 +1,10 @@
 #!/usr/bin/env bash
-# Access-layer tests for the metatrader-docker image, T21: the window the desktop
-# shows while MetaTrader can't start, and the installers' signature check
-# refusing an unsigned file or a signer that only writes the organisation into
-# another field of its name.
-#
-# Each configuration runs the image on an internal Docker network, which has
-# no internet: MetaTrader's first-start downloads fail at once, and the access layer
-# doesn't need MetaTrader. Other containers of the same image probe it with curl and
-# openssl, so no host port is used, except by --host. Everything the script
-# starts is removed when it ends.
+# Integration tests for access control, TLS, origins, and signature verification.
+# Runs container instances on an isolated internal network without internet access.
 #
 # Usage: tests/access.sh [--host] [image]
-#   --host  also run T15, host networking on the host's 127.0.0.1:3911. It
-#           binds a port on this machine, so it runs only when asked.
-#   image   defaults to metatrader-docker:dev.
+#   --host  Includes host-networking tests (binds 127.0.0.1:3911)
+#   image   Container image to test (default: metatrader-docker:dev)
 set -euo pipefail
 
 host_test=no

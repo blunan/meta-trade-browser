@@ -1,25 +1,14 @@
 #!/usr/bin/python3 -I
-# notice.py: the window on the desktop while MetaTrader can't start yet, or
-# when Python couldn't be installed or updated. run-terminal.sh opens it, and
-# sends it one line per update, its fields separated by tabs:
-#   install <step>             MetaTrader is installing, and is at this step
-#   retry <seconds> <reason>   this attempt failed; the next starts in <seconds>
-#   start                      MetaTrader is starting
-#   warning <reason>           Python couldn't be installed or updated, but
-#                              MetaTrader starts: this one stays above
-#                              MetaTrader's window until it's closed
-#
-# Openbox manages it, so it has the same title bar as MetaTrader's windows, and
-# it's styled like MetaTrader's dialogs under Wine: the colours are theirs.
-# Openbox maximizes every window, but a fixed size keeps this one small, as it
-# does those dialogs. It stays centred when the screen changes size, as it does
-# when a browser connects. Closing it hides it until the next update. It exits
-# once its parent has gone, so it never outlives run-terminal.sh, or MetaTrader
-# after the hand-off.
+# notice.py: Desktop status/progress dialog displayed during MetaTrader setup
+# or errors. Receives tab-separated update events over stdin from run-terminal.sh:
+#   install <step>            Current installation progress
+#   retry <seconds> <reason>  Error state with retry countdown
+#   start                     Launch in progress
+#   warning <reason>          Non-fatal warning kept above main window
 import math
 import os
 
-# The desktop has no accessibility bus, and GTK would warn that it's missing.
+# Disable AT-SPI accessibility bus warnings.
 os.environ["NO_AT_BRIDGE"] = "1"
 
 import gi  # noqa: E402
@@ -29,7 +18,7 @@ gi.require_version("GdkPixbuf", "2.0")
 gi.require_version("Gtk", "3.0")
 from gi.repository import GLib  # noqa: E402
 
-# Before GTK starts: its window class, which tests look for, comes from this.
+# Set window class before GTK initialization (checked by test suite).
 GLib.set_prgname("mt-notice")
 
 from gi.repository import Gdk, GdkPixbuf, Gtk  # noqa: E402
@@ -72,9 +61,7 @@ TEXT_WIDTH = 420
 
 
 def error_icon(size=32):
-    """Wine's error icon, drawn here: the base has no SVG loader for the theme's
-    icons, and no cairo for Python. A red circle, darker below and at its rim,
-    with a white cross, each pixel sampled 4 x 4 times for smooth edges."""
+    """Draws an anti-aliased error icon without external SVG or Cairo dependencies."""
     top, bottom, rim = (0xF6, 0x47, 0x47), (0xD0, 0x0B, 0x0B), (0xA8, 0x08, 0x08)
     radius = size / 2 - 1.5
     reach, stroke = size * 0.23, size * 0.13

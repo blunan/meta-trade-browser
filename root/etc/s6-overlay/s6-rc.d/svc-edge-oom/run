@@ -1,11 +1,7 @@
 #!/usr/bin/with-contenv bash
 # shellcheck shell=bash
-# svc-edge-oom: when the container reaches its memory limit, the kernel stops
-# the process with the highest out-of-memory score, normally the largest one:
-# MetaTrader. Once a second, this gives Edge's processes (WebView2, the HTML panes)
-# the highest score, so the kernel stops one of them first. That pane goes
-# blank, and MetaTrader keeps running. Raising a score needs no privileges, so this
-# runs as the desktop user.
+# svc-edge-oom: Adjusts WebView2 (msedgewebview2.exe) oom_score_adj to 1000 so
+# kernel OOM killer terminates HTML renderers before MetaTrader.
 set -euo pipefail
 
 if (( EUID == 0 )); then

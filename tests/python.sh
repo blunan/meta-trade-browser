@@ -1,16 +1,9 @@
 #!/usr/bin/env bash
-# Python tests for a running metatrader-docker container with MT_PYTHON=true: the
-# MetaTrader5 package connects to MetaTrader, and nothing listens on the network
-# while a script is attached, as the guide says. Only HTTPS on 3001 listens,
-# as T16 checks in tests/access.sh.
-#
-# By hand: CI doesn't install MetaTrader, and the package connects only once
-# MetaTrader has logged in to an account (a demo will do). The script changes
-# nothing in the container.
+# Verifies Python integration (MT_PYTHON=true) against a running container:
+# asserts MetaTrader5 IPC connects and no unexpected network ports listen.
 #
 # Usage: tests/python.sh [container]
-#   container  defaults to metatrader-docker-dev, the one tests/compose.dev.yaml
-#              runs.
+#   container  Container name (default: metatrader-docker-dev)
 set -euo pipefail
 
 name="${1:-metatrader-docker-dev}"
