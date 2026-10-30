@@ -11,22 +11,22 @@
 ![Debian 13 trixie](https://img.shields.io/badge/Debian-13%20trixie-A81D33?logo=debian&logoColor=white)
 ![Python 3.14](https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white)
 
-**MetaTrader in your browser.** The MetaTrader terminal and MetaEditor run on a small Linux desktop inside a container, and you use them from any browser as you would on your own computer: charts, Expert Advisors (EAs, the MQL5 programs that trade from a chart), MetaEditor and the Strategy Tester. One container runs one trading account.
+**MetaTrader in your browser.** Run the MetaTrader 5 terminal and MetaEditor in a lightweight Linux desktop container accessible from any browser: charts, Expert Advisors (EAs), MetaEditor, and Strategy Tester. One container runs one trading account.
 
-It installs MetaTrader 5, MetaQuotes' current release, and runs it under WineHQ staging (Wine runs Windows programs on Linux) on [linuxserver.io's Selkies desktop](https://github.com/linuxserver/docker-baseimage-selkies), Debian 13.
+Runs under WineHQ staging on [linuxserver.io's Selkies desktop](https://github.com/linuxserver/docker-baseimage-selkies) (Debian 13).
 
-> 📖 **The full guide is at [metatrader-docker.blunan.com](https://metatrader-docker.blunan.com/):** reverse proxies and VPNs, settings, updates and troubleshooting.
+> 📖 **Full guide at [metatrader-docker.blunan.com](https://metatrader-docker.blunan.com/):** reverse proxies, VPNs, settings, updates, and troubleshooting.
 
 ## ✨ Features
 
-* 🌐 **Any browser** — charts, EAs, MetaEditor and the Strategy Tester, as on your own computer, with the clipboard and MetaTrader's sounds.
-* 🔐 **Password and HTTPS** — a password is required, and the desktop is served over HTTPS only.
-* 🏠 **Private by default** — Docker publishes it on the server's loopback address, `127.0.0.1`, unless you choose another. Reach it through an SSH tunnel, a VPN or your own reverse proxy.
-* 🛡️ **A locked-down desktop** — no terminal and no `sudo`, and other websites can't open your desktop's stream or embed its page.
-* ✅ **Signature-checked installers** — MetaQuotes' installer and Microsoft's WebView2 installer are downloaded at the first start, and run only if their code signatures check out; so is Python's, if you turn it on. The image itself contains no MetaQuotes or Microsoft software.
-* 📂 **Your EAs, your folder** — an optional folder of your EAs, indicators and scripts appears in MetaTrader as `Mounted`.
-* 🐍 **Optional Python** — with `MT_PYTHON=true`, Windows Python and MetaQuotes' `MetaTrader5` package are installed too, for `.py` scripts on charts.
-* 💾 **Clean stops** — MetaTrader saves its charts and settings at every stop, and starts again by itself if it closes or crashes.
+* 🌐 **Any browser** — Charts, EAs, MetaEditor, and Strategy Tester with shared clipboard and audio support.
+* 🔐 **HTTPS & password** — Required password authentication; served strictly over HTTPS.
+* 🏠 **Private by default** — Binds to loopback (`127.0.0.1`) by default. Access via SSH tunnel, VPN, or reverse proxy.
+* 🛡️ **Hardened desktop** — No terminal or `sudo`; origin checks prevent stream hijacking and framing.
+* ✅ **Verified installers** — Downloads MetaQuotes, Microsoft Edge WebView2, and optional Python installers at first boot only after verifying Authenticode signatures. Base image contains no proprietary binaries.
+* 📂 **Custom EA directory** — Mount host directories into MetaTrader under `MQL5/<section>/Mounted`.
+* 🐍 **Optional Python** — Set `MT_PYTHON=true` to install Windows Python and MetaQuotes' `MetaTrader5` package for Python scripting.
+* 💾 **Graceful shutdown** — Saves charts and settings across stops; automatically relaunches on unexpected exit.
 
 > ⚠️ Not affiliated with or endorsed by MetaQuotes or Microsoft.
 
@@ -52,40 +52,39 @@ sudo chown root:root secrets/password
 sudo chmod 0400 secrets/password
 ```
 
-Keep the password in your password manager; from then on, `sudo cat secrets/password` shows it. `data` will hold your saved broker logins, and `ea` is the optional EA folder. The container works as user and group 1000: if `id -u` or `id -g` prints another number, set `PUID` and `PGID` to them.
+Keep the password in your password manager (`sudo cat secrets/password` to view). `data` stores broker credentials (mode 700), and `ea` holds custom MQL5 files. If your host user/group differs from 1000, set `PUID` and `PGID` in `compose.yaml`.
 
 **2. Save this as `compose.yaml`** in the same folder:
 
 ```yaml
 # metatrader-docker: MetaTrader in your browser, one container for one trading account.
-# The quick start creates the folders and the password file first.
 services:
   metatrader-docker:
-    image: ghcr.io/blunan/metatrader-docker:latest    # or a date tag such as :20261019.1, to stay on one build
+    image: ghcr.io/blunan/metatrader-docker:latest    # or pinned date tag e.g. :20261019.1
     container_name: metatrader-docker
     restart: unless-stopped
-    stop_grace_period: 30s                     # time for MetaTrader to save its charts and settings
-    # Never add init: true: the image's own supervisor has to be process 1.
+    stop_grace_period: 30s                     # allow MetaTrader to persist state cleanly
+    # Never add init: true: image s6 supervisor must be process 1.
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
-    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]   # the desktop's startup needs all six
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]   # required for desktop startup
     shm_size: 1gb
-    mem_limit: 4g                              # 6g for heavy use of the HTML panes (Help, Market)
+    mem_limit: 4g                              # 6g for heavy HTML pane usage (Help, Market)
     environment:
       FILE__PASSWORD: /run/secrets/password
     secrets: [password]
     volumes:
-      - ./data:/config                         # everything for the account
-      - ./ea:/mql5                             # optional: your EAs, indicators and scripts
+      - ./data:/config                         # persistent account data
+      - ./ea:/mql5                             # optional: custom EAs, indicators and scripts
     ports:
-      - "127.0.0.1:3001:3001"                  # this machine only: an SSH tunnel or a proxy reaches it
+      - "127.0.0.1:3001:3001"                  # localhost only: reach via SSH tunnel or reverse proxy
 
 secrets:
   password:
     file: ./secrets/password
 ```
 
-Without Compose, the guide's [quick start](https://metatrader-docker.blunan.com/quick-start/#4-start-it) has the same container as a `docker run` command.
+Without Compose, see the [quick start](https://metatrader-docker.blunan.com/quick-start/#4-start-it) for equivalent `docker run` syntax.
 
 **3. Start it** and follow its log:
 
@@ -94,30 +93,30 @@ docker compose up -d
 docker compose logs -f
 ```
 
-The first start installs Microsoft Edge WebView2 and MetaTrader. It takes about 2–3 minutes, and it's done when the log says `starting MetaTrader`.
+Initial setup downloads and installs WebView2 and MetaTrader (~2–3 minutes), completing when the log reports `starting MetaTrader`.
 
-**4. Open the desktop.** On your own computer, open an SSH tunnel to the server and leave it open:
+**4. Open the desktop.** On your computer, open an SSH tunnel to the server:
 
 ```sh
 ssh -N -L 3001:127.0.0.1:3001 you@your-server
 ```
 
-Then browse to `https://localhost:3001`, and accept the certificate warning: the container made its own certificate (the guide shows [how to trust it](https://metatrader-docker.blunan.com/quick-start/#5-open-the-desktop)). Sign in as `trader` with the password.
+Browse to `https://localhost:3001` and accept the self-signed certificate (see guide to [trust it locally](https://metatrader-docker.blunan.com/quick-start/#5-open-the-desktop)). Sign in as `trader` with your password.
 
-**5. Set up MetaTrader.** Log in to your trading account with *Save password* ticked. Before an EA trades, turn on MetaTrader's algo-trading protections, as the guide's [step 6](https://metatrader-docker.blunan.com/quick-start/#6-set-up-metatrader) shows.
+**5. Configure MetaTrader.** Log in with *Save password* enabled. Configure algorithmic trading protections in **Tools → Options → Experts** as shown in [step 6](https://metatrader-docker.blunan.com/quick-start/#6-set-up-metatrader).
 
 ## 📖 The guide
 
 | Page | What's in it |
 | :--- | :--- |
-| 🚀 [Quick start](https://metatrader-docker.blunan.com/quick-start/) | Every step in full, with `docker run` as well as Compose, and how to trust the certificate |
-| 🌍 [Access and reverse proxy](https://metatrader-docker.blunan.com/access/) | SSH tunnel, VPN, Tailscale, Caddy, nginx, Traefik, cloudflared, your own certificate and host networking |
-| ⚙️ [Folders and settings](https://metatrader-docker.blunan.com/settings/) | What `data`, `ea` and the password file hold, backups, every setting, and what the startup check refuses or warns about |
-| 🖱️ [Using MetaTrader](https://metatrader-docker.blunan.com/using/) | Clipboard, sound, shortcuts, MetaEditor, the HTML panes, memory and Python |
-| 🔄 [Operations and updates](https://metatrader-docker.blunan.com/operations/) | Stopping, restarts, health check, image tags, updating and MetaTrader's LiveUpdate |
-| 🩺 [Troubleshooting](https://metatrader-docker.blunan.com/troubleshooting/) | Where the logs are, failed installs and harmless messages |
-| 🔏 [Security and verification](https://metatrader-docker.blunan.com/verify/) | Pin a digest and check its cosign signature, outgoing connections and AI-agent servers |
-| 🛠️ [Build it yourself](https://metatrader-docker.blunan.com/building/) | Local build, access tests, CI and building the guide |
+| 🚀 [Quick start](https://metatrader-docker.blunan.com/quick-start/) | Complete setup guide, `docker run` flags, and local certificate trust |
+| 🌍 [Access and reverse proxy](https://metatrader-docker.blunan.com/access/) | SSH tunnel, VPN, Tailscale, Caddy, nginx, Traefik, cloudflared, custom certificates, and host networking |
+| ⚙️ [Folders and settings](https://metatrader-docker.blunan.com/settings/) | Volume mounts, backups, environment variables, validation rules, and warnings |
+| 🖱️ [Using MetaTrader](https://metatrader-docker.blunan.com/using/) | Clipboard, audio, shortcuts, MetaEditor, HTML panes, memory sizing, and Python scripting |
+| 🔄 [Operations and updates](https://metatrader-docker.blunan.com/operations/) | Graceful shutdown, restarts, health check, image tags, updates, and LiveUpdate |
+| 🩺 [Troubleshooting](https://metatrader-docker.blunan.com/troubleshooting/) | Log locations, common installation failures, and benign startup warnings |
+| 🔏 [Security and verification](https://metatrader-docker.blunan.com/verify/) | Image digest pinning, Cosign verification, outbound traffic, and AI-agent servers |
+| 🛠️ [Build it yourself](https://metatrader-docker.blunan.com/building/) | Local Docker builds, test suite, CI workflows, and documentation preview |
 
 ## 📄 License
 
@@ -125,4 +124,4 @@ Copyright (C) 2026 Brayan Luna
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 3. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See [LICENSE](LICENSE) for the full text.
 
-The image is built on [linuxserver.io's](https://www.linuxserver.io/) Selkies base image, also GPL-3.0. At the first start it downloads MetaQuotes' MetaTrader 5 and Microsoft's Edge WebView2 Runtime from their publishers. With `MT_PYTHON=true` it also downloads Python from python.org, and the `MetaTrader5` and `numpy` packages from PyPI. They come under their own license terms, not this project's. This project isn't affiliated with or endorsed by MetaQuotes or Microsoft.
+Built on [linuxserver.io's](https://www.linuxserver.io/) Selkies base image (GPL-3.0). During initial setup, the container downloads MetaTrader 5 and Edge WebView2 Runtime from their respective publishers (and Python / packages if `MT_PYTHON=true`). These components are subject to their own license terms. Not affiliated with or endorsed by MetaQuotes or Microsoft.

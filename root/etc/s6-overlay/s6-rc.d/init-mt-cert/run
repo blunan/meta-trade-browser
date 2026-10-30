@@ -1,31 +1,23 @@
 #!/usr/bin/with-contenv bash
 # shellcheck shell=bash
-# init-mt-cert: the desktop's own certificate, /config/ssl/cert.pem and
-# cert.key, served unless you mount your own there. It runs before the base's
-# init-nginx, which then finds it and makes none of its own.
-#
-# It's issued to localhost, 127.0.0.1 and ::1, so it can be trusted on your
-# computer for the SSH tunnel's address, and it can't sign other certificates,
-# so trusting it vouches for nothing else. 825 days is the longest macOS
-# accepts for a server certificate; a start in its last 30 days renews it.
-#
-# A certificate of your own in /config/ssl is never touched. The one the base
-# makes (issued to "*" by "Linuxserver.io", and able to sign others) is
-# replaced. So is an empty cert.pem: removing a mount over it leaves one behind.
+# init-mt-cert: Generates or renews the default self-signed TLS certificate
+# (/config/ssl/cert.{pem,key}) for localhost/127.0.0.1/::1 (825-day validity,
+# renewed when <=30 days remain). Custom mounted certificates are preserved;
+# default Linuxserver.io certificates are replaced.
 set -euo pipefail
 
 dir=/config/ssl
 cert="$dir/cert.pem"
 key="$dir/cert.key"
 own_subject='O=metatrader-docker, CN=localhost'
-# What it was issued to under the project's earlier names, in a /config an older build made.
+# Legacy subject names from earlier project versions.
 old_subjects=('O=meta-trade-browser, CN=localhost' 'O=mt-browser, CN=localhost')
 base_subject='C=US, ST=CA, L=Carlsbad, O=Linuxserver.io, OU=LSIO Server, CN=*'
 renew_within=$((30 * 24 * 3600))
 
 log() { printf '[mt-cert] %s\n' "$*"; }
 
-# A mount whose file doesn't exist on the server becomes a folder.
+# Fail if mounted certificate path resolved to a directory.
 for file in "$cert" "$key"; do
   if [[ -e "$file" && ! -f "$file" ]]; then
     log "ERROR: $file isn't a file. If you mount your own certificate there, check that the file the mount names exists on the server."
@@ -56,7 +48,7 @@ fi
 
 mkdir -p "$dir"
 chown abc:abc "$dir"
-# Made next to the old one, then moved over it.
+# Generate atomically via temporary directory.
 new="$(mktemp -d "$dir/.new.XXXXXX")"
 trap 'rm -rf "$new"' EXIT
 if ! openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -sha256 -noenc -days 825 \

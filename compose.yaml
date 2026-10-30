@@ -1,25 +1,24 @@
 # metatrader-docker: MetaTrader in your browser, one container for one trading account.
-# The quick start creates the folders and the password file first.
 services:
   metatrader-docker:
-    image: ghcr.io/blunan/metatrader-docker:latest    # or a date tag such as :20261019.1, to stay on one build
+    image: ghcr.io/blunan/metatrader-docker:latest    # or pinned date tag e.g. :20261019.1
     container_name: metatrader-docker
     restart: unless-stopped
-    stop_grace_period: 30s                     # time for MetaTrader to save its charts and settings
-    # Never add init: true: the image's own supervisor has to be process 1.
+    stop_grace_period: 30s                     # allow MetaTrader to persist state cleanly
+    # Never add init: true: image s6 supervisor must be process 1.
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
-    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]   # the desktop's startup needs all six
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]   # required for desktop startup
     shm_size: 1gb
-    mem_limit: 4g                              # 6g for heavy use of the HTML panes (Help, Market)
+    mem_limit: 4g                              # 6g for heavy HTML pane usage (Help, Market)
     environment:
       FILE__PASSWORD: /run/secrets/password
     secrets: [password]
     volumes:
-      - ./data:/config                         # everything for the account
-      - ./ea:/mql5                             # optional: your EAs, indicators and scripts
+      - ./data:/config                         # persistent account data
+      - ./ea:/mql5                             # optional: custom EAs, indicators and scripts
     ports:
-      - "127.0.0.1:3001:3001"                  # this machine only: an SSH tunnel or a proxy reaches it
+      - "127.0.0.1:3001:3001"                  # localhost only: reach via SSH tunnel or reverse proxy
 
 secrets:
   password:

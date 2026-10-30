@@ -1,16 +1,9 @@
 #!/usr/bin/env bash
-# Python tests for a running metatrader-docker container with MT_PYTHON=true: the
-# MetaTrader5 package connects to MetaTrader, and nothing listens on the network
-# while a script is attached, as the guide says. Only HTTPS on 3001 listens,
-# as T16 checks in tests/access.sh.
-#
-# By hand: CI doesn't install MetaTrader, and the package connects only once
-# MetaTrader has logged in to an account (a demo will do). The script changes
-# nothing in the container.
+# Verifies Python integration (MT_PYTHON=true) against a running container:
+# asserts MetaTrader5 IPC connects and no unexpected network ports listen.
 #
 # Usage: tests/python.sh [container]
-#   container  defaults to metatrader-docker-dev, the one tests/compose.dev.yaml
-#              runs.
+#   container  Container name (default: metatrader-docker-dev)
 set -euo pipefail
 
 name="${1:-metatrader-docker-dev}"
@@ -44,8 +37,7 @@ check() {
   fi
 }
 
-# listeners: the container's listening TCP and UDP sockets, as hexadecimal
-# address:port, without Docker's DNS server on 127.0.0.11 (as in tests/access.sh).
+# Return open TCP/UDP listening sockets (hexadecimal ip:port), excluding Docker DNS.
 listeners() {
   docker exec "$name" sh -c '
     for f in tcp tcp6; do awk "NR > 1 && \$4 == \"0A\" { print \$2 }" /proc/net/$f; done
@@ -56,8 +48,7 @@ listeners() {
 echo "Container: $name"
 check "listening sockets before a script attaches (only HTTPS on 3001)" "00000000:0BB9" "$(listeners)"
 
-# A script that attaches, says so, and stays attached for 20 s. Before
-# MetaTrader's first login, initialize() fails after about a minute.
+# Attach MetaTrader5 Python client and verify connection.
 docker exec -u abc "$name" wine python -I -c '
 import time
 import MetaTrader5 as mt5

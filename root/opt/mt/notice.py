@@ -1,25 +1,14 @@
 #!/usr/bin/python3 -I
-# notice.py: the window on the desktop while MetaTrader can't start yet, or
-# when Python couldn't be installed or updated. run-terminal.sh opens it, and
-# sends it one line per update, its fields separated by tabs:
-#   install <step>             MetaTrader is installing, and is at this step
-#   retry <seconds> <reason>   this attempt failed; the next starts in <seconds>
-#   start                      MetaTrader is starting
-#   warning <reason>           Python couldn't be installed or updated, but
-#                              MetaTrader starts: this one stays above
-#                              MetaTrader's window until it's closed
-#
-# Openbox manages it, so it has the same title bar as MetaTrader's windows, and
-# it's styled like MetaTrader's dialogs under Wine: the colours are theirs.
-# Openbox maximizes every window, but a fixed size keeps this one small, as it
-# does those dialogs. It stays centred when the screen changes size, as it does
-# when a browser connects. Closing it hides it until the next update. It exits
-# once its parent has gone, so it never outlives run-terminal.sh, or MetaTrader
-# after the hand-off.
+# notice.py: Desktop status/progress dialog displayed during MetaTrader setup
+# or errors. Receives tab-separated update events over stdin from run-terminal.sh:
+#   install <step>            Current installation progress
+#   retry <seconds> <reason>  Error state with retry countdown
+#   start                     Launch in progress
+#   warning <reason>          Non-fatal warning kept above main window
 import math
 import os
 
-# The desktop has no accessibility bus, and GTK would warn that it's missing.
+# Disable AT-SPI accessibility bus warnings.
 os.environ["NO_AT_BRIDGE"] = "1"
 
 import gi  # noqa: E402
@@ -29,7 +18,7 @@ gi.require_version("GdkPixbuf", "2.0")
 gi.require_version("Gtk", "3.0")
 from gi.repository import GLib  # noqa: E402
 
-# Before GTK starts: its window class, which tests look for, comes from this.
+# Set window class before GTK initialization (checked by test suite).
 GLib.set_prgname("mt-notice")
 
 from gi.repository import Gdk, GdkPixbuf, Gtk  # noqa: E402
@@ -72,9 +61,7 @@ TEXT_WIDTH = 420
 
 
 def error_icon(size=32):
-    """Wine's error icon, drawn here: the base has no SVG loader for the theme's
-    icons, and no cairo for Python. A red circle, darker below and at its rim,
-    with a white cross, each pixel sampled 4 x 4 times for smooth edges."""
+    """Draws an anti-aliased error icon without external SVG or Cairo dependencies."""
     top, bottom, rim = (0xF6, 0x47, 0x47), (0xD0, 0x0B, 0x0B), (0xA8, 0x08, 0x08)
     radius = size / 2 - 1.5
     reach, stroke = size * 0.23, size * 0.13
@@ -114,9 +101,7 @@ class Notice(Gtk.Window):
         self.set_resizable(False)
         self.set_position(Gtk.WindowPosition.CENTER)
         self.connect("delete-event", lambda *_: self.hide() or True)
-        # GTK centres the window without its title bar, and a new size keeps
-        # its top-left corner, so it's centred again whenever its frame or the
-        # screen changes size.
+        # Re-centre on window frame resize or display resolution change.
         self.centred = None
         self.connect("configure-event", self.on_configure)
         Gdk.Screen.get_default().connect("size-changed", lambda *_: self.centre())
@@ -163,7 +148,7 @@ class Notice(Gtk.Window):
     def read(self, fd, _condition):
         data = os.read(fd, 4096)
         if not data:
-            # run-terminal.sh closed its end: the last update stays.
+            # End of input stream: keep last status visible.
             return False
         self.input += data
         while b"\n" in self.input:
@@ -199,7 +184,7 @@ class Notice(Gtk.Window):
             )
 
     def show_state(self, heading, icon=False, detail=None, bar=False, note=None, above=False):
-        # Above MetaTrader's maximized window, or it would hide this one.
+        # Keep visible above maximized windows.
         self.set_keep_above(above)
         self.heading.set_text(heading)
         self.icon.set_visible(icon)
@@ -234,7 +219,7 @@ class Notice(Gtk.Window):
         self.centred = (frame.width, frame.height)
         display = Gdk.Display.get_default()
         area = (display.get_primary_monitor() or display.get_monitor(0)).get_geometry()
-        # Where the frame's top-left corner goes, title bar included.
+        # Position frame centrally on primary monitor.
         self.move(area.x + (area.width - frame.width) // 2, area.y + (area.height - frame.height) // 2)
 
     def pulse(self):

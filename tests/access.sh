@@ -1,19 +1,10 @@
 #!/usr/bin/env bash
-# Access-layer tests for the metatrader-docker image, T21: the window the desktop
-# shows while MetaTrader can't start, and the installers' signature check
-# refusing an unsigned file or a signer that only writes the organisation into
-# another field of its name.
-#
-# Each configuration runs the image on an internal Docker network, which has
-# no internet: MetaTrader's first-start downloads fail at once, and the access layer
-# doesn't need MetaTrader. Other containers of the same image probe it with curl and
-# openssl, so no host port is used, except by --host. Everything the script
-# starts is removed when it ends.
+# Integration tests for access control, TLS, origins, and signature verification.
+# Runs container instances on an isolated internal network without internet access.
 #
 # Usage: tests/access.sh [--host] [image]
-#   --host  also run T15, host networking on the host's 127.0.0.1:3911. It
-#           binds a port on this machine, so it runs only when asked.
-#   image   defaults to metatrader-docker:dev.
+#   --host  Includes host-networking tests (binds 127.0.0.1:3911)
+#   image   Container image to test (default: metatrader-docker:dev)
 set -euo pipefail
 
 host_test=no
@@ -66,7 +57,7 @@ check_true() {
   fi
 }
 
-# The compose example's hardening, so the tests see what users run.
+# Hardening profile matching compose.yaml defaults.
 hardening=(
   --memory 1g --cpus 1 --pids-limit 1024 --shm-size 256m
   --security-opt no-new-privileges:true
@@ -74,20 +65,18 @@ hardening=(
   --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER
   --cap-add SETUID --cap-add SETGID --cap-add KILL
 )
-# A password file as echo writes it, with a line break at the end.
+# Test password file with trailing newline.
 printf '%s\n' "$password" > "$tmp/password"
 printf '%s' 'only8chr' > "$tmp/short"
 printf '%s' 'securepassword' > "$tmp/placeholder"
 : > "$tmp/docker.sock"
 with_password=(-v "$tmp/password:/run/secrets/password:ro" -e FILE__PASSWORD=/run/secrets/password)
-# A certificate of your own, and a key that doesn't belong to it.
+# Custom certificate and mismatched key for validation testing.
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=mt-access-test \
   -keyout "$tmp/tls.key" -out "$tmp/tls.crt" 2> /dev/null
 openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out "$tmp/other.key" 2> /dev/null
 own_cert=(-v "$tmp/tls.crt:/config/ssl/cert.pem:ro" -v "$tmp/tls.key:/config/ssl/cert.key:ro")
-# Docker 29.4.2's seccomp profile refused socketcall, the call 32-bit programs
-# open sockets with, with ENOSYS (38). Wine's 32-bit programs need it. This
-# profile refuses that call and nothing else.
+# Seccomp profile simulating Docker 29.4.2 socketcall refusal (ENOSYS 38).
 cat > "$tmp/no-socketcall.json" << 'EOF'
 {"defaultAction": "SCMP_ACT_ALLOW",
  "architectures": ["SCMP_ARCH_X86_64", "SCMP_ARCH_X86", "SCMP_ARCH_X32"],
@@ -101,15 +90,13 @@ start() {
   docker run -d --name "$name" --network "$network" "${hardening[@]}" "$@" "$image" > /dev/null
 }
 
-# health <name> [path]: the status of a request to the container's health-check
-# server, on its socket file. The path defaults to /healthz.
+# health <name> [path]: queries container healthcheck socket (defaults to /healthz).
 health() {
   docker exec "$run-$1" curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
     --unix-socket /run/mt/health.sock "http://localhost${2:-/healthz}" 2> /dev/null || true
 }
 
-# until_health <name> <status>: waits up to 60 s for the health check to answer
-# that status; succeeds if it did.
+# until_health <name> <status>: waits up to 60s for target health status.
 until_health() {
   local _
   for _ in $(seq 1 60); do
@@ -119,8 +106,7 @@ until_health() {
   return 1
 }
 
-# ready <name>: waits until the health check answers 200: nginx is up, and
-# Selkies answers through it.
+# ready <name>: waits up to 90s for healthy status (HTTP 200).
 ready() {
   local name="$run-$1" _
   for _ in $(seq 1 90); do
@@ -137,10 +123,7 @@ ready() {
   return 1
 }
 
-# refused <description> <text in the REFUSED line> [docker run options...]:
-# the container must stop, and its log must name the reason. It starts at
-# once, and refusals_checked checks it: the refusals all start together,
-# rather than one after another.
+# refused <description> <reason> [docker run options...]: launches container expected to halt on validation.
 refusals=()
 refused() {
   local name="$run-refused-$((${#refusals[@]} / 3))"
@@ -148,8 +131,7 @@ refused() {
   refusals+=("$name" "$1" "$2")
 }
 
-# refusals_checked: checks the containers refused started, in order. Each gets
-# up to 60 s to stop.
+# refusals_checked: asserts that all expected refusal containers halted with logged reason within 60s.
 refusals_checked() {
   local i name description text state reason
   for ((i = 0; i < ${#refusals[@]}; i += 3)); do

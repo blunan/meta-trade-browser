@@ -1,113 +1,110 @@
 # Folders and settings
 
-What needs files, such as your EAs or a certificate of your own, needs no environment setting: you mount the files in the right place. Environment settings go under `environment` in `compose.yaml`, or with `-e` in `docker run`. Changes take effect when the container is recreated: `docker compose up -d`, or remove the container and run it again.
+File-based configuration (custom EAs, scripts, TLS certificates) is managed via volume mounts. Environment variables are configured under `environment` in `compose.yaml` (or `-e` with `docker run`). Changes apply on container recreation (`docker compose up -d`).
 
 ## Folders and files
 
-| In the container | On the server | What's in it |
+| Container path | Host path | Description |
 |---|---|---|
-| `/config` (required) | `./data` | Everything for the account: Wine, the MetaTrader program, account logins and servers, charts with their EAs and inputs, settings, price history and logs, the desktop's certificate, and Windows Python if you turn it on. MetaTrader updates itself here. |
-| `/mql5` (optional) | `./ea` | Your own EAs, indicators and scripts, laid out like MetaTrader's `MQL5` folder: `Experts`, `Indicators`, `Scripts`, `Include`, `Libraries`, `Presets`. |
-| `/run/secrets/password` | `./secrets/password` | The desktop password. |
-| `/config/ssl/cert.pem`, `/config/ssl/cert.key` (optional) | your certificate's files, such as `./tls/cert.pem` | A certificate of your own, and its key (see [Your own certificate](access.md#your-own-certificate)). |
+| `/config` (required) | `./data` | Persistent account state: Wine prefix, MetaTrader installation, broker credentials, charts, price history, logs, SSL certificate, and optional Windows Python environment. |
+| `/mql5` (optional) | `./ea` | Custom EAs, indicators, and scripts. Mirrors MetaTrader's `MQL5` folder structure (`Experts`, `Indicators`, `Scripts`, `Include`, `Libraries`, `Presets`). |
+| `/run/secrets/password` | `./secrets/password` | Desktop access password file. |
+| `/config/ssl/cert.{pem,key}` (optional) | Custom path e.g. `./tls/cert.{pem,key}` | Custom TLS certificate and unencrypted private key (see [Your own certificate](access.md#your-own-certificate)). |
 
 ### `/config`
 
-- It's a bind mount (a host folder), not a named Docker volume. `docker system prune --volumes` can't delete it while the container is stopped, and it's easy to back up.
-- Keep it at mode `0700`: it holds saved broker logins. The container makes user 1000 (`PUID`) its owner at every start, and its log warns if other users on the host have any access to it.
-- Back up `data` and the EA folder regularly, encrypted, and try a restore now and then.
+- Host bind mount (not an anonymous Docker volume) protecting against `docker system prune --volumes` and simplifying backups.
+- Keep mode `0700` (contains saved account credentials). Permissions are updated to `PUID` (`1000`) on container start.
+- Maintain regular, encrypted backups of `data` and `ea`.
 
 ### The EA folder (`/mql5`)
 
-- Each of its sections appears in MetaTrader as a subfolder named `Mounted`, such as `MQL5/Experts/Mounted`.
-- `Files` is never linked, because EAs keep their own data there.
-- A missing section is created when the folder is writable, and skipped when it's read-only (`./ea:/mql5:ro`).
-- On its first start, MetaTrader compiles the sources it finds there.
-- *Refresh* in the Navigator shows files added on the host.
-- With [file transfers](#the-main-settings) on, uploads land in its `Experts`, and appear in the Navigator under *Expert Advisors → Mounted* after *Refresh*. When it's read-only, or not mounted, they land in MetaTrader's own `MQL5/Experts`, in `data`.
+- Subdirectories appear inside MetaTrader under `MQL5/<section>/Mounted` (e.g. `MQL5/Experts/Mounted`).
+- `Files` is not symlinked (EAs store local data directly).
+- Missing sections are created automatically if the mount is writable.
+- New files appear in MetaTrader's Navigator after clicking *Refresh*.
+- When [file transfers](#the-main-settings) are enabled, browser uploads land in `Experts` (or MetaTrader's native `Experts` directory if unmounted).
 
 ## The main settings
 
-| Setting | Default | What it does |
+| Setting | Default | Description |
 |---|---|---|
-| `FILE__PASSWORD` | none | **Required:** the path of the desktop password's file. At least 12 characters, and not a well-known placeholder such as `password` or `changeme`. A line break at the end is ignored. `PASSWORD`, the password itself, works too, but `docker inspect` shows it. |
-| `PUID`, `PGID` | `1000` | The user and group that own `/config` and the desktop's programs. Set them to your `id -u` and `id -g` when those aren't 1000. |
-| `CUSTOM_USER` | `trader` | The desktop's login name. |
-| `TITLE` | `MetaTrader` | The browser tab's name. |
-| `TZ` | UTC | The desktop's time zone. MetaTrader shows its server's time anyway. |
-| `SELKIES_CLIPBOARD_ENABLED` | `true` | The shared clipboard: `true`, `in` (browser to desktop only), `out` (desktop to browser only) or `false`. |
-| `SELKIES_FILE_TRANSFERS` | `false` | `true` turns on file transfers through the browser, and the side panel's file panel with them. `upload` or `download` allows one direction only. Uploads land in the [EA folder](#the-ea-folder-mql5)'s `Experts` when it's mounted and writable, and appear in the Navigator under *Expert Advisors → Mounted* after *Refresh*. Otherwise they land in MetaTrader's own `MQL5/Experts`, in `/config`, and appear under *Expert Advisors*. The file panel offers downloads from the same folder, and can't choose another. |
-| `MT_PYTHON` | off | `true` installs Windows Python and MetaQuotes' `MetaTrader5` package (and `numpy`) into `/config` at the next start, once the Python Software Foundation's signature passes and the packages' hashes match the image's list. MetaTrader and MetaEditor find it by themselves (see [Python](using.md#python)). |
-| `MT_AI_AGENTS` | off | `true` turns on MetaTrader's and MetaEditor's servers for AI agents (see [MetaTrader's AI-agent servers](verify.md#metatraders-ai-agent-servers)). |
+| `FILE__PASSWORD` | none | **Required:** Path to password file (minimum 12 characters, excluding common placeholders like `password` or `changeme`). Trailing newlines are stripped. `PASSWORD` is also accepted, but exposes credentials in `docker inspect`. |
+| `PUID`, `PGID` | `1000` | UID and GID owning `/config` and desktop processes. Set to host `id -u` and `id -g` when different from 1000. |
+| `CUSTOM_USER` | `trader` | Desktop login username. |
+| `TITLE` | `MetaTrader` | Browser tab title. |
+| `TZ` | `UTC` | Desktop time zone. MetaTrader displays broker server time regardless. |
+| `SELKIES_CLIPBOARD_ENABLED` | `true` | Shared clipboard: `true`, `in` (client to desktop), `out` (desktop to client), or `false`. |
+| `SELKIES_FILE_TRANSFERS` | `false` | Enables browser file transfers (`true`, `upload`, or `download`). Uses `/mql5/Experts` if mounted and writable, otherwise MetaTrader's `/config/.../MQL5/Experts`. |
+| `MT_PYTHON` | off | `true` installs Windows Python 3.14 and verified `MetaTrader5` / `numpy` wheels into `/config` at startup (see [Python](using.md#python)). |
+| `MT_AI_AGENTS` | off | `true` enables loopback MCP agent servers in MetaTrader and MetaEditor (see [MetaTrader's AI-agent servers](verify.md#metatraders-ai-agent-servers)). |
 
 ## Reverse proxy, VPN and host networking
 
-See [Access and reverse proxy](access.md). A certificate of your own needs no setting: see [Your own certificate](access.md#your-own-certificate).
+See [Access and reverse proxy](access.md) for network integration patterns.
 
-| Setting | Default | What it does |
+| Setting | Default | Description |
 |---|---|---|
-| `TRUSTED_PROXIES` | none | IP addresses or ranges, such as `172.20.0.5` or `10.8.0.0/24`. When set, only they get in, and everyone else gets 403. Requests from them have their `X-Forwarded-For` logged. |
-| `SELKIES_ALLOWED_ORIGINS` | none: the page's own origin only | Other origins allowed to open the stream, comma-separated, such as `https://mt.example.com`. `*` is refused. |
-| `SUBFOLDER` | `/` | Serves the desktop under a path, such as `/mt/`. |
-| `CUSTOM_HTTPS_PORT` | `3001` | The HTTPS port inside the container. For host networking. |
-| `LISTEN_ADDRESS` | all of the container's addresses; `127.0.0.1` with host networking | The one address the HTTPS port listens on. For host networking. |
+| `TRUSTED_PROXIES` | none | Allowed proxy IPs or CIDR blocks (e.g. `172.20.0.5`, `10.8.0.0/24`). All other traffic receives 403. Enables `X-Forwarded-For` logging. |
+| `SELKIES_ALLOWED_ORIGINS` | none | Comma-separated list of additional allowed WebSocket origins (e.g. `https://mt.example.com`). Wildcards (`*`) are refused. |
+| `SUBFOLDER` | `/` | Base URL path for reverse proxy sub-path routing (e.g. `/mt/`). |
+| `CUSTOM_HTTPS_PORT` | `3001` | Internal HTTPS port; primarily used with host networking. |
+| `LISTEN_ADDRESS` | `0.0.0.0` (`127.0.0.1` for host networking) | Specific interface address for nginx to bind. |
 
 ## Settings that go together
 
-- `PUID` and `PGID`: set both, to your `id -u` and `id -g`.
-- `TRUSTED_PROXIES` needs the proxy and the container on a Docker network of their own. The SSH tunnel then gets 403, so if the proxy is your only way in, remove `ports` (see [What every proxy needs](access.md#what-every-proxy-needs)).
-- `SELKIES_ALLOWED_ORIGINS` is needed only when your proxy replaces the `Host` header.
-- `SUBFOLDER` needs a proxy that forwards the path as it is, without removing it.
-- `LISTEN_ADDRESS` and `CUSTOM_HTTPS_PORT` are for host networking. On Docker's default network, change the server's port in `ports` instead: `127.0.0.1:3101:3001` serves the desktop on the server's port 3101.
+- `PUID` and `PGID`: configure together to match host user permissions.
+- `TRUSTED_PROXIES`: requires placing proxy and container on a shared Docker network. Direct access via published `ports` will receive 403.
+- `SELKIES_ALLOWED_ORIGINS`: required only if your reverse proxy overrides the incoming `Host` header.
+- `SUBFOLDER`: requires a proxy configuration that forwards the subpath intact.
+- `LISTEN_ADDRESS` and `CUSTOM_HTTPS_PORT`: used with host networking. On bridge networks, remap host ports in `ports` instead (e.g. `127.0.0.1:3101:3001`).
 
 ## Wine's own
 
-For troubleshooting:
+Troubleshooting environment variables:
 
-| Setting | Default | What it does |
+| Setting | Default | Description |
 |---|---|---|
-| `WINEDEBUG` | `fixme-all,err-toolbar` | What Wine writes to the log: its errors, minus the noise from MetaTrader's toolbar. During the first start's install, Wine writes nothing, unless you set `WINEDEBUG` yourself. For troubleshooting, `fixme-all` brings the toolbar's errors back, and an empty value restores Wine's defaults, which add its "fixme" notes. |
-| `WINEDLLOVERRIDES` | `mscoree,mshtml=` | Turns off Wine's Mono (.NET) and Gecko (Internet Explorer's engine), so Wine never stops to offer them; MetaTrader uses neither. A value of your own replaces this one, so keep those two in it. |
+| `WINEDEBUG` | `fixme-all,err-toolbar` | Wine log filter. Suppresses noisy toolbar errors by default. Set to empty for full Wine debug output. |
+| `WINEDLLOVERRIDES` | `mscoree,mshtml=` | Disables Mono (.NET) and Gecko prompts, which MetaTrader does not use. |
 
 ## Other settings
 
-The base image's and Selkies' other settings, such as `SELKIES_ENCODER` or `LC_ALL`, reach them unchanged: nothing filters the container's environment. They aren't tested with this image. A value you set replaces the image's own, its protections included: `SELKIES_MICROPHONE_ENABLED=true` brings the microphone back, for instance. The refusals below still apply.
+Unfiltered environment variables (e.g. `SELKIES_ENCODER`, `LC_ALL`) pass through directly to Selkies and the base image. Overriding security variables (e.g. `SELKIES_MICROPHONE_ENABLED=true`) will re-enable disabled features.
 
-Three have no effect, because the container replaces the base's web server setup with its own: `CUSTOM_PORT`, `CUSTOM_WS_PORT` and `DISABLE_IPV6`.
+The following base settings have no effect due to customized web server routing: `CUSTOM_PORT`, `CUSTOM_WS_PORT`, `DISABLE_IPV6`.
 
 ## Deprecated
 
-Still read, with a warning in the log. Images from 2026-12-22 on ignore them.
+Retained for backwards compatibility (ignored in images built on/after 2026-12-22):
 
-| Setting | Instead |
+| Setting | Migration |
 |---|---|
-| `TLS_CERT_FILE`, `TLS_KEY_FILE` | Mount your certificate and key at `/config/ssl/cert.pem` and `cert.key` (see [Your own certificate](access.md#your-own-certificate)). |
-| `FILE_MANAGER_PATH` | Nothing: uploads land in the EA folder's `Experts` when it's mounted and writable, otherwise in MetaTrader's own (see `SELKIES_FILE_TRANSFERS` above). |
+| `TLS_CERT_FILE`, `TLS_KEY_FILE` | Mount files to `/config/ssl/cert.pem` and `cert.key` (see [Your own certificate](access.md#your-own-certificate)). |
+| `FILE_MANAGER_PATH` | Managed automatically via `SELKIES_FILE_TRANSFERS` and `/mql5/Experts`. |
 
 ## Refused
 
-The container stops at once, and its log says why in a `[mt-access] REFUSED:` line. With `restart: unless-stopped`, `docker ps` then shows it *Restarting*. These settings remove a protection and have no use here:
+The container halts immediately with `[mt-access] REFUSED:` when configured with unsafe settings:
 
-- no password, a file that can't be read, fewer than 12 characters, or a well-known placeholder;
-- `SELKIES_ALLOWED_ORIGINS` with `*`: any website could open your stream;
-- a `TRUSTED_PROXIES` that covers every address (`0.0.0.0/0`, `::/0`), or holds something that isn't an address or range;
-- a certificate and key in `/config/ssl` that can't be read or don't belong together, or only one of the two;
-- while they're still read, only one of `TLS_CERT_FILE` and `TLS_KEY_FILE`, a path with unusual characters, or a file that can't be read;
-- privileged mode (`privileged: true`, or `cap_add: SYS_ADMIN`), or the Docker socket mounted: the desktop would control the server;
-- `DEV_MODE`, `PIXELFLUX_WAYLAND=true`, `SELKIES_MODE=webrtc`, `SELKIES_ENABLE_DUAL_MODE=true`, `SELKIES_COMPUTER_USE_BIND`, or another `SELKIES_UNIX_SOCKET`. These are the base image's development mode, its Wayland desktop, WebRTC streaming, and extra servers outside the login;
-- a malformed `CUSTOM_HTTPS_PORT`, `CUSTOM_USER`, `SUBFOLDER` or `LISTEN_ADDRESS`;
-- a `SELKIES_FILE_TRANSFERS` or `SELKIES_CLIPBOARD_ENABLED` value other than those in the table: Selkies would read one such as `off` as on, both ways.
+- Missing, unreadable, or placeholder password (`password`, `changeme`), or fewer than 12 characters.
+- `SELKIES_ALLOWED_ORIGINS` set to `*` (permits arbitrary sites to stream desktop).
+- `TRUSTED_PROXIES` set to `0.0.0.0/0`, `::/0`, or invalid network syntax.
+- Mismatched, unreadable, or incomplete certificates in `/config/ssl`.
+- Container runs in privileged mode (`privileged: true` or `cap_add: SYS_ADMIN`), or Docker socket is mounted.
+- Base image development or unsupported streaming modes (`DEV_MODE`, `PIXELFLUX_WAYLAND=true`, `SELKIES_MODE=webrtc`, `SELKIES_ENABLE_DUAL_MODE=true`, `SELKIES_COMPUTER_USE_BIND`).
+- Invalid values for `CUSTOM_HTTPS_PORT`, `CUSTOM_USER`, `SUBFOLDER`, `LISTEN_ADDRESS`, `SELKIES_FILE_TRANSFERS`, or `SELKIES_CLIPBOARD_ENABLED`.
 
 ## Warned about
 
-In the log, because you might have a reason:
+Logged as `[mt-access] WARNING:` during startup:
 
-- `PASSWORD` set directly;
-- `CUSTOM_PORT`, which has no effect: there's no plain HTTP;
-- `HARDEN_DESKTOP=false`: terminals come back, and `sudo` too without `no-new-privileges`;
-- `SELKIES_COMMAND_ENABLED=true`: the web page can run commands on the desktop, as a terminal would;
-- `DOCKER_MODS`: linuxserver's add-ons, which run as root at every start;
-- `no-new-privileges` off;
-- a `/config` that other users on the host can read;
-- host networking, and `MT_AI_AGENTS=true` with host networking;
-- the [deprecated](#deprecated) settings, and an upload folder the desktop's user can't create.
+- `PASSWORD` passed directly in environment (visible via `docker inspect`).
+- `CUSTOM_PORT` configured (plain HTTP is disabled).
+- `HARDEN_DESKTOP=false` (restores terminal and sudo).
+- `SELKIES_COMMAND_ENABLED=true` (allows web clients to run desktop commands).
+- `DOCKER_MODS` enabled (runs unverified root modifications at boot).
+- `no-new-privileges` disabled.
+- `/config` world-readable on host.
+- Host networking enabled, or `MT_AI_AGENTS=true` combined with host networking.
+- Deprecated environment variables.

@@ -2,24 +2,15 @@
 # metatrader-docker: MetaTrader in the browser, on linuxserver's Selkies desktop.
 FROM ghcr.io/linuxserver/baseimage-selkies:debiantrixie@sha256:df4a9259e7535526005785202bd08b3b066250a64c65877802b2354fd6a975dd
 
-# Wine's Windows DLLs carry debug information that only crash backtraces use.
-# Stripping it saves about 1 GB unpacked. Set to false for a troubleshooting build.
+# Strip Wine debug symbols to save ~1 GB. Set false for crash backtraces.
 ARG STRIP_WINE_DEBUG=true
 
-# The WineHQ staging release the Wine step installs. Renovate proposes each new
-# one in its own pull request.
+# Pinned WineHQ staging release; updated via Renovate.
 # renovate: datasource=deb depName=winehq-staging
 ARG WINE_VERSION=11.19~trixie-1
 
-# Same-origin streaming only, no commands from the web page, no switch to
-# WebRTC, and Selkies on a socket file that only nginx can reach. MetaTrader's
-# sounds play in the browser, but the microphone and webcam are locked off, and
-# their buttons leave the side panel. The side panel has no video or audio
-# settings (the audio ones include a microphone picker). Selkies' own login
-# stays off (the base sets it; init-mt-access makes sure). The login name is
-# trader, and the desktop's user is 1000:1000. The file panel shows when file
-# transfers are on (init-mt-access sets it, unless you do), and uploads land
-# in the EA folder's Experts, or MetaTrader's own (init-mt-access picks).
+# Runtime defaults: locked-down Selkies streaming over Unix socket to nginx,
+# audio enabled without mic/webcam, and default trader user (1000:1000).
 ENV TITLE=MetaTrader \
     CUSTOM_USER=trader \
     PUID=1000 \
@@ -50,11 +41,7 @@ ENV TITLE=MetaTrader \
     NO_GAMEPAD=true \
     S6_BEHAVIOUR_IF_STAGE2_FAILS=2
 
-# Wine: WineHQ staging, pinned to WINE_VERSION. The repository key is trusted
-# only if its fingerprint matches. osslsigncode, which checks the installers'
-# signatures, is Debian 13's current build, like the image's other Debian
-# packages. The strip and the purge run in this same layer, so what they
-# remove doesn't stay behind in it.
+# Install WineHQ staging (verified by GPG fingerprint) and osslsigncode.
 RUN <<'EOF'
 #!/bin/bash
 set -euo pipefail
@@ -85,45 +72,31 @@ if [ "$STRIP_WINE_DEBUG" = true ]; then
     strip --strip-debug "$f"
     count=$((count + 1))
   done < <(find "$lib/x86_64-windows" "$lib/i386-windows" -type f -print0)
-  # Wine recognises its own DLLs by this mark, so the strip must keep it.
+  # Verify stripped DLLs retain the Wine builtin mark.
   for f in "$lib/x86_64-windows/ntdll.dll" "$lib/i386-windows/ntdll.dll"; do
     test "$(head -c 80 "$f" | tail -c 16)" = "Wine builtin DLL"
   done
   echo "Stripped debug information from $count Wine DLLs: $before MB -> $(du -sm "$lib" | cut -f1) MB"
 fi
 
-# Docker-in-Docker is never used here (START_DOCKER=false), and these packages
-# carried all of the base's fixable HIGH and CRITICAL findings.
+# Remove unused Docker packages to eliminate base image CVEs.
 apt-get purge -y --auto-remove \
   docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin containerd.io
 apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade -y
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 
-# Debian's "snakeoil" key pair was generated once, when the base was built, so
-# every copy of the base has the same one. Nothing here uses it (nginx gets its
-# own certificate in /config/ssl). The base's layer still holds it, but gone
-# from the filesystem it can't be used by mistake.
+# Remove shared base snakeoil certificates (nginx generates unique certs in /config/ssl).
 find /etc/ssl/certs -lname '*ssl-cert-snakeoil.pem' -delete
 rm -f /etc/ssl/certs/ssl-cert-snakeoil.pem /etc/ssl/private/ssl-cert-snakeoil.key
 EOF
 
-# Changes to the base's setup. Each edit is checked, so a base update that
-# changes these scripts fails here.
-# - With host networking, nothing but nginx's port may be reachable. Selkies'
-#   socket file is shared with nginx through the group mtsock (Selkies
-#   creates it group-writable), and Xvfb drops its abstract socket, which
-#   host networking would share.
-# - nginx's health-check socket outlives a killed nginx, which then can't
-#   start again, so nginx's start script removes a leftover one first.
-# - At a stop, the desktop service's finish script signals the desktop's
-#   processes and waits up to 5 s for them. Its list included openbox's
-#   thread, which ignores the signal, so every stop lost 5 s. Threads are
-#   left out now.
-# - The startup log keeps the image's branding but not linuxserver's request
-#   for donations, which would read as this image's.
-# - nginx's setup script no longer creates the upload folder,
-#   FILE_MANAGER_PATH: init-mt-access picks it, and creates it.
+# Base image patches (asserted against upstream changes):
+# - Isolate sockets for host networking (group mtsock; drop Xvfb abstract socket).
+# - Clean up stale healthcheck socket on nginx start.
+# - Exclude threads from desktop shutdown signal waiting to prevent a 5s delay.
+# - Remove upstream donation banner from startup log.
+# - Defer upload directory creation to init-mt-access.
 RUN <<'EOF'
 #!/bin/bash
 set -euo pipefail
@@ -166,19 +139,17 @@ EOF
 
 COPY root/ /
 
-# The window run-terminal.sh shows until MetaTrader starts (notice.py) uses the
-# base's GTK 3 from the system's Python. A base update that drops it fails here.
+# Validate GTK 3 availability and syntax for notice.py.
 RUN /usr/bin/python3 -I -c 'import gi; gi.require_version("Gtk", "3.0"); from gi.repository import Gtk' && \
     /usr/bin/python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' /opt/mt/notice.py
 
-# Each Microsoft-signed installer is verified against its own pinned roots, and
-# no others: WebView2's against Root Certificate Authority 2011 (code signing)
-# and 2010 (timestamps), Python's against Identity Verification Root
-# Certificate Authority 2020 (both).
+# Verify pinned root CAs:
+# - WebView2: Microsoft Root CA 2011 (signing) & 2010 (timestamps)
+# - Python: Microsoft Identity Verification Root CA 2020
 RUN <<'EOF'
 #!/bin/bash
 set -euo pipefail
-# pinned <file> <SHA-256>...: the file holds exactly these certificates.
+# pinned <file> <SHA-256>...: asserts pem file contains exact certificate fingerprints.
 pinned() {
   local pem="$1" tmp actual
   shift
@@ -186,8 +157,7 @@ pinned() {
     echo "$pem holds more than certificates" >&2
     exit 1
   fi
-  # One block per certificate: a block openssl can't read would drop out of
-  # the fingerprints below, unnoticed.
+  # Verify openssl can inspect each certificate block individually.
   test "$(grep -c -- '-----BEGIN CERTIFICATE-----' "$pem")" -eq $#
   tmp="$(mktemp -d)"
   awk -v d="$tmp" '/-----BEGIN CERTIFICATE-----/ { n++ } n { print > (d "/" n ".pem") }' "$pem"
@@ -202,13 +172,11 @@ pinned /opt/mt/certs/microsoft-identity-root.pem \
   5367F20C7ADE0E2BCA790915056D086B720C33C1FA2A2661ACF787E3292E1270
 EOF
 
-# The labels and their values come last: every RUN after an ARG sees that
-# ARG's value, so a new version or date earlier on would rebuild every layer.
-# CI passes the real values; a local build is "dev".
+# Metadata labels (placed last to preserve layer cache).
 ARG IMAGE_VERSION=dev
 ARG IMAGE_REVISION=
 ARG IMAGE_CREATED=
-# Every label the base sets describes the base, so each one is replaced.
+# Override upstream base labels.
 LABEL org.opencontainers.image.title="metatrader-docker" \
       org.opencontainers.image.description="MetaTrader in the browser: WineHQ staging on linuxserver's Selkies desktop, secure by default. Not affiliated with MetaQuotes or Microsoft." \
       org.opencontainers.image.authors="Brayan Luna" \
@@ -224,8 +192,7 @@ LABEL org.opencontainers.image.title="metatrader-docker" \
       build_version="metatrader-docker version ${IMAGE_VERSION}" \
       maintainer="Brayan Luna"
 
-# Healthy while MetaTrader runs and the desktop answers. The first start installs for
-# about 2 minutes (3 with MT_PYTHON=true), which the start period covers.
+# Healthcheck succeeds when MetaTrader and desktop respond.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5m --retries=3 \
   CMD ["/opt/mt/healthcheck.sh"]
 

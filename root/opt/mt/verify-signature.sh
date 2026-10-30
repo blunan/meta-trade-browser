@@ -1,22 +1,11 @@
 #!/usr/bin/env bash
 # verify-signature.sh metaquotes|microsoft|python <file>
 #
-# Checks an installer's Authenticode signature before it runs. It passes only
-# when osslsigncode verifies the primary signature, timestamp and revocation
-# lists included, and the signer's certificate names its organisation as
-# exactly MetaQuotes Ltd, Microsoft Corporation or Python Software Foundation.
-# Exit code 0: passed; 1: refused; 2: wrong usage.
-#   metaquotes  mt5setup.exe, against Debian's CA bundle. osslsigncode fetches
-#               DigiCert's revocation lists itself.
-#   microsoft   the WebView2 installer, against the two Microsoft roots pinned
-#               in microsoft-roots.pem. Microsoft serves its revocation lists in
-#               a way osslsigncode's own download refuses, so they're fetched here.
-#   python      the Python installer, against the Microsoft root pinned in
-#               microsoft-identity-root.pem: the Python Software Foundation signs
-#               through Microsoft's ID Verified code signing. Its revocation lists
-#               are fetched here too.
-# No file hash is pinned: the signature is the check. MetaQuotes and Microsoft
-# replace their files without notice, and Renovate moves Python's version.
+# Verifies Authenticode signatures, timestamps, CRLs, and exact Subject O:
+#   metaquotes -> mt5setup.exe against system CA bundle
+#   microsoft  -> WebView2 installer against pinned microsoft-roots.pem
+#   python     -> Python installer against pinned microsoft-identity-root.pem
+# Exit codes: 0 = valid signature, 1 = verification failed, 2 = usage error.
 set -euo pipefail
 
 certs=/opt/mt/certs
@@ -39,9 +28,7 @@ file="$2"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-# signature_certs: the certificates the file's signature carries, as
-# $tmp/sig.pem and one per file in $tmp/cert-<n>.pem. Fails if the file has no
-# signature.
+# Extracts signature certificates into $tmp/cert-<n>.pem.
 certs_split=no
 signature_certs() {
   if [[ "$certs_split" == no ]]; then
@@ -55,8 +42,7 @@ signature_certs() {
 
 log "$(basename "$file"): $(stat -c %s "$file") bytes, SHA-256 $(sha256sum "$file" | cut -d' ' -f1)"
 
-# -index 0: the primary signature. The WebView2 installer also carries a
-# second, self-signed one, Microsoft's internal "EdgeBuild" signature.
+# -index 0 selects the primary signature (ignores internal EdgeBuild signature).
 args=(verify -index 0)
 if [[ "$kind" == metaquotes ]]; then
   organisation="MetaQuotes Ltd"
@@ -70,8 +56,7 @@ else
   if [[ "$kind" == microsoft ]]; then
     organisation="Microsoft Corporation"
     roots="$certs/microsoft-roots.pem"
-    # The signer's certificate comes through Code Signing PCA 2011 or PCA 2024
-    # (newer installers), the timestamp's through Time-Stamp PCA 2010.
+    # Fetch CRLs for Code Signing PCAs and Time-Stamp PCA 2010.
     crl_ok=no
     if crl MicCodSigPCA2011_2011-07-08.crl "$tmp/signer.crl" &&
       crl 'Microsoft%20Code%20Signing%20PCA%202024.crl' "$tmp/signer.crl" &&
@@ -81,11 +66,7 @@ else
   else
     organisation="Python Software Foundation"
     roots="$certs/microsoft-identity-root.pem"
-    # The signer's certificate comes through Identity Verification Root CA 2020,
-    # ID Verified Code Signing PCA 2021 and one of its numbered CAs, which
-    # changes from release to release (EOC CA 03 for 3.14.9, EOC CA 04 for
-    # 3.14.10; there are AOC ones too). The signer's certificate names its CA's
-    # list. The timestamp's comes through Public RSA Timestamping CA 2020.
+    # Discover intermediate CRL from signer cert (Identity Verification PKI hierarchy).
     issuer_crl=
     if signature_certs; then
       issuer_crl="$(openssl pkcs7 -in "$tmp/sig.pem" -print_certs -text -noout 2> /dev/null |
@@ -107,13 +88,12 @@ else
   if [[ "$crl_ok" != yes ]]; then
     refuse "can't be checked: Microsoft's revocation lists couldn't be fetched from $microsoft_crls/."
   fi
-  # -ignore-cdp: only these lists, no download attempts of osslsigncode's own.
+  # -ignore-cdp: use only explicitly provided CRLs.
   args+=(-CAfile "$roots" -TSA-CAfile "$roots" -CRLfile "$tmp/signer.crl"
     -TSA-CRLfile "$tmp/timestamp.crl" -ignore-cdp)
 fi
 
-# osslsigncode's own fetch of DigiCert's lists makes one attempt, and its first
-# lookup of the server's name sometimes fails. Only that is retried.
+# Retry on transient CRL lookup failure.
 for attempt in 1 2 3; do
   rc=0
   report="$(timeout 120 osslsigncode "${args[@]}" -in "$file" 2>&1)" || rc=$?
@@ -121,13 +101,12 @@ for attempt in 1 2 3; do
     break
   fi
   if (( attempt < 3 )); then
-    log "a revocation list couldn't be fetched; checking again in 5 s"
+    log "CRL fetch failed; retrying in 5 s"
     sleep 5
   fi
 done
 
-# The first "Subject:" and "Issuer :" after "Signer's certificate:" belong to
-# the primary signature's signer, as /C=../O=../CN=.. fields.
+# Extract signer Subject, Issuer, and Timestamp.
 signer="$(awk '/^Signer.s certificate:/ { s = 1 } s && /Subject:/ { sub(/^[ \t]*Subject: */, ""); print; exit }' <<< "$report")"
 issuer="$(awk '/^Signer.s certificate:/ { s = 1 } s && /Issuer *:/ { sub(/^[ \t]*Issuer *: */, ""); print; exit }' <<< "$report")"
 timestamp="$(awk '/^[ \t]*Timestamp time:/ { sub(/^[ \t]*Timestamp time: */, ""); print; exit }' <<< "$report")"
@@ -139,12 +118,7 @@ if (( rc != 0 )) || ! grep -q -x 'Signature verification: ok' <<< "$report"; the
   done <<< "$report"
   refuse "failed its signature check (osslsigncode exit code $rc)."
 fi
-# The organisation comes from the signer's certificate itself, one field per
-# line: in osslsigncode's one-line subject, a "/" inside a value would look like
-# the start of another field. The signer is the certificate with the serial
-# number osslsigncode reports for it, and every certificate in the signature
-# with that number must name the organisation, exactly: "MetaQuotes Ltd2"
-# doesn't pass.
+# Parse exact organizationName from matching signer certificate.
 serial="$(awk '/^Signer.s certificate:/ { s = 1 } s && /Serial *:/ { sub(/^[ \t]*Serial *: */, ""); print; exit }' <<< "$report")"
 matches=0
 if [[ -n "$serial" ]] && signature_certs; then

@@ -1,9 +1,7 @@
 #!/usr/bin/with-contenv bash
 # shellcheck shell=bash
-# init-mt-access: checks the access settings, then writes nginx's site and
-# password file. It runs after the base's init-nginx and init-selkies-config,
-# and before any service starts. A refusal stops the container
-# (S6_BEHAVIOUR_IF_STAGE2_FAILS=2), so it never runs unprotected.
+# init-mt-access: Validates security settings, configures nginx site, and generates
+# password credentials before services start. Refusal halts the container.
 set -euo pipefail
 
 env_dir=/run/s6/container_environment
@@ -30,8 +28,7 @@ refuse() {
   exit 1
 }
 
-# Selkies reads a setting as true when it's "true" or "1", ignoring case and a
-# "|locked" suffix.
+# Matches Selkies boolean truthy values ("true", "1", "|locked").
 selkies_true() {
   local value="${1%%|*}"
   value="${value,,}"
@@ -39,14 +36,13 @@ selkies_true() {
   [[ "$value" == true || "$value" == 1 ]]
 }
 
-# 1. Nothing from the last run carries over.
+# 1. Clean runtime directory.
 rm -rf /run/mt
 install -d -m 0755 /run/mt
 
 # 2. The settings.
 
-## The password. init-envfile has copied FILE__PASSWORD's file, newline and
-## all, to $env_dir/PASSWORD; PASSWORD given directly is there too.
+## Validate password from FILE__PASSWORD or PASSWORD.
 if [[ ! -f "$env_dir/PASSWORD" ]]; then
   if [[ -n "${FILE__PASSWORD:-}" ]]; then
     refuse "the password file can't be read." \
@@ -84,7 +80,7 @@ else
   warn "PASSWORD is set directly, so 'docker inspect' shows it. Put it in a file and set FILE__PASSWORD instead."
 fi
 
-## Values that end up in nginx's configuration or its password file.
+## Validate port, user, and subfolder.
 if [[ ! "$port" =~ ^[0-9]{1,5}$ ]] || (( 10#$port < 1 || 10#$port > 65535 )); then
   refuse "CUSTOM_HTTPS_PORT must be a port number, 1 to 65535." "CUSTOM_HTTPS_PORT=$port"
 fi
@@ -97,7 +93,7 @@ if [[ ! "$subfolder" =~ ^/([A-Za-z0-9._~-]+/)*$ ]]; then
     "SUBFOLDER=$subfolder"
 fi
 
-## Cross-site access to the stream.
+## Validate allowed WebSocket origins.
 IFS=',' read -r -a origins <<< "${SELKIES_ALLOWED_ORIGINS:-}"
 for origin in "${origins[@]}"; do
   origin="${origin%%|*}"
@@ -107,9 +103,7 @@ for origin in "${origins[@]}"; do
   fi
 done
 
-## File transfers and the clipboard. Selkies reads a value it doesn't know,
-## such as "off", as its default: on, both ways. So only the values listed
-## here pass.
+## Validate file transfers and clipboard settings.
 transfers="${SELKIES_FILE_TRANSFERS:-}"
 transfers="${transfers,,}"
 transfers="${transfers//[[:space:]]/}"
@@ -122,9 +116,7 @@ case "$transfers" in
       "It's '${SELKIES_FILE_TRANSFERS}', which Selkies would read as upload and download both on." ;;
 esac
 printf '%s' "$transfers" > "$env_dir/SELKIES_FILE_TRANSFERS"
-# The file panel follows them, unless you set SELKIES_UI_SIDEBAR_SHOW_FILES
-# yourself: the image sets it to auto. (An empty value wouldn't do: the
-# startup environment drops it, and the base then writes false.)
+# Sync sidebar file panel visibility with transfer setting.
 if [[ "${SELKIES_UI_SIDEBAR_SHOW_FILES:-}" == auto ]]; then
   if [[ "$transfers" == none ]]; then
     printf 'false' > "$env_dir/SELKIES_UI_SIDEBAR_SHOW_FILES"
@@ -132,9 +124,7 @@ if [[ "${SELKIES_UI_SIDEBAR_SHOW_FILES:-}" == auto ]]; then
     printf 'true' > "$env_dir/SELKIES_UI_SIDEBAR_SHOW_FILES"
   fi
 fi
-# Where uploads land, and the folder downloads come from: the EA folder's
-# Experts when /mql5 is mounted and the desktop's user can write there,
-# otherwise MetaTrader's own.
+# Determine upload/download directory (prefer mounted /mql5/Experts if writable).
 files="$WINEPREFIX/drive_c/Program Files/MetaTrader 5/MQL5/Experts"
 if [[ -d /mql5 ]] && s6-setuidgid abc mkdir -p /mql5/Experts 2> /dev/null &&
   s6-setuidgid abc test -w /mql5/Experts; then
@@ -149,9 +139,7 @@ if ! s6-setuidgid abc mkdir -p "$files" 2> /dev/null; then
   warn "the desktop's user can't create $files, so uploads there will fail."
 fi
 printf '%s' "$files" > "$env_dir/FILE_MANAGER_PATH"
-# The base copies SELKIES_CLIPBOARD_ENABLED to SELKIES_ENABLE_CLIPBOARD, the
-# one Selkies reads, unless that's set. Selkies ignores case, spaces and a
-# "|..." suffix, and reads empty as its default, true.
+# Normalize clipboard setting.
 clipboard_raw="${SELKIES_ENABLE_CLIPBOARD-${SELKIES_CLIPBOARD_ENABLED-}}"
 clipboard="${clipboard_raw%%|*}"
 clipboard="${clipboard,,}"
@@ -166,7 +154,7 @@ case "$clipboard" in
       "It's '$clipboard_raw', which Selkies would read as on, both ways." ;;
 esac
 
-## TRUSTED_PROXIES: IP addresses or CIDR ranges, comma- or space-separated.
+## Validate TRUSTED_PROXIES.
 trusted=()
 if [[ -n "${TRUSTED_PROXIES:-}" ]]; then
   if ! checked="$(python3 -I - "$TRUSTED_PROXIES" 2>&1 <<'EOF'
@@ -190,13 +178,12 @@ EOF
   mapfile -t trusted <<< "$checked"
 fi
 
-## Plain HTTP doesn't exist here.
+## Warn on unused plain HTTP port.
 if [[ -n "${CUSTOM_PORT:-}" ]]; then
   warn "CUSTOM_PORT is set, but there is no plain HTTP. Only HTTPS listens, on CUSTOM_HTTPS_PORT ($port)."
 fi
 
-## The certificate: yours or the container's own, in /config/ssl. init-mt-cert
-## has made the container's own if there was none.
+## Validate TLS certificate and private key in /config/ssl.
 cert=/config/ssl/cert.pem
 key=/config/ssl/cert.key
 # Deprecated: remove on or after 2026-12-22.
@@ -220,7 +207,7 @@ elif [[ ! -f "$cert" || ! -f "$key" ]]; then
   refuse "no certificate in /config/ssl: cert.pem and cert.key must both be there." \
     "To serve your own, mount both files, or neither."
 fi
-# nginx would fail later, with a less clear message.
+# Pre-validate certificate and key format for nginx.
 if ! cert_public="$(openssl x509 -in "$cert" -noout -pubkey 2> /dev/null)"; then
   refuse "$cert isn't a certificate nginx can read. It must be PEM."
 fi
@@ -241,7 +228,7 @@ if [[ -z "${cert_source:-}" ]]; then
   fi
 fi
 
-## Settings with no use here that would remove a protection.
+## Enforce security boundaries and disallow unsafe settings.
 cap_eff="$(awk '/^CapEff:/ { print $2 }' /proc/self/status)"
 if (( (16#$cap_eff >> 21) & 1 )); then
   refuse "the container has CAP_SYS_ADMIN (privileged mode, or cap_add SYS_ADMIN)." \
@@ -278,9 +265,7 @@ fi
 if [[ "${SELKIES_UNIX_SOCKET:-}" != "$socket" ]]; then
   refuse "SELKIES_UNIX_SOCKET must stay $socket. nginx's site and the socket folder are made for it."
 fi
-# Selkies' own login. nginx does the login, and the password never reaches
-# Selkies (step 6). With its login on, Selkies wouldn't start without one, and
-# unset means on.
+# Disable Selkies basic auth (authentication is handled by nginx).
 if selkies_true "${SELKIES_ENABLE_BASIC_AUTH:-}"; then
   refuse "SELKIES_ENABLE_BASIC_AUTH=true. nginx does the login, and Selkies never gets the password, so it couldn't start."
 fi
@@ -288,7 +273,7 @@ if [[ -z "${SELKIES_ENABLE_BASIC_AUTH:-}" ]]; then
   printf 'false' > "$env_dir/SELKIES_ENABLE_BASIC_AUTH"
 fi
 
-## Settings that loosen things for a reason you might have.
+## Warn on relaxed security options.
 harden="${HARDEN_DESKTOP:-}"
 if [[ "${harden,,}" != true ]]; then
   warn "HARDEN_DESKTOP is off: the desktop gets terminals back, and sudo too without no-new-privileges."
@@ -307,9 +292,7 @@ if (( 8#$config_mode & 8#007 )); then
   warn "/config is open to other users on the host (mode $config_mode). It holds saved broker logins: run 'chmod 700' on the host folder."
 fi
 
-# 3. The listen address. Host networking shows a network card with hardware
-# behind it, or Docker's host-side interfaces. A VPN sidecar's tun0 or
-# tailscale0 doesn't count.
+# 3. Detect host networking and configure listen address.
 host_network=no
 for dev in /sys/class/net/*; do
   name="${dev##*/}"
@@ -339,10 +322,7 @@ if [[ "${MT_AI_AGENTS:-}" == true && "$host_network" == yes ]]; then
   warn "MT_AI_AGENTS=true with host networking: MetaTrader's AI-agent servers listen on the host's loopback, protected only by their API key."
 fi
 
-# 4. Selkies' socket folder. Only Selkies' user (abc) and nginx's (www-data,
-# through the group mtsock) can reach the socket. The setgid bit gives the
-# socket that group; abc sets it, because without CAP_FSETID the kernel
-# silently drops it when root does.
+# 4. Configure permissions for Selkies Unix socket directory (abc:mtsock 2750).
 mkdir -p "$socket_dir"
 chown abc:mtsock "$socket_dir"
 chmod 0750 "$socket_dir"
@@ -351,8 +331,7 @@ if [[ "$(stat -c '%a %U %G' "$socket_dir")" != "2750 abc mtsock" ]]; then
   refuse "couldn't prepare $socket_dir for Selkies' socket." "$(stat -c '%A %U %G' "$socket_dir")"
 fi
 
-# 5. The password hash: SHA-512 crypt, readable by nginx only. It replaces the
-# base's MD5-based file, which everyone in the container could read.
+# 5. Generate SHA-512 crypt htpasswd for nginx (0640 root:www-data).
 hash="$(printf '%s\n' "$password" | openssl passwd -6 -stdin)"
 (
   umask 077
@@ -362,13 +341,11 @@ chown root:www-data "$htpasswd.new"
 chmod 0640 "$htpasswd.new"
 mv -f "$htpasswd.new" "$htpasswd"
 
-# 6. The services that start next, the desktop and MetaTrader among them, never get
-# the plain-text password.
+# 6. Purge plaintext password from environment.
 rm -f "$env_dir/PASSWORD"
 unset password hash
 
-# 7. nginx's site: the desktop server, and the health-check server on
-# /run/mt/health.sock, whose /healthz serves this file.
+# 7. Render nginx site and healthcheck endpoints.
 mkdir -p "$conf_dir"
 printf 'ok\n' > "$conf_dir/healthz"
 : > "$conf_dir/allow.conf"
@@ -393,13 +370,13 @@ sed \
   -e "s|MT_SOCKET|$socket|g" \
   "$template" > "$site"
 
-# 8. Let nginx check it.
+# 8. Test nginx configuration.
 if ! nginx_test="$(nginx -t 2>&1)"; then
   mapfile -t lines <<< "$nginx_test"
   refuse "nginx rejected its configuration:" "${lines[@]}"
 fi
 
-# 9. What came out.
+# 9. Log startup summary.
 if (( ${#trusted[@]} > 0 )); then
   allowed="only ${trusted[*]}"
 else

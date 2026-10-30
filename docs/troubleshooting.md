@@ -2,30 +2,30 @@
 
 ## Where the logs are
 
-- **`docker logs metatrader-docker`** (or `docker compose logs`) has everything:
-    - the certificate, as an `[mt-cert]` line when it's made or renewed;
-    - the startup check, as `[mt-access]` lines;
-    - the install and every MetaTrader start, as `[mt]` lines;
-    - the stop, as `[mt-stop]`;
-    - nginx's log of logins and requests;
-    - Wine's errors.
-- **MetaTrader's start log** stays in `/config/log/mt/run-terminal.log` (`data/log/mt/` on the host) across restarts.
+- **`docker logs metatrader-docker`** (or `docker compose logs`):
+    - `[mt-cert]`: TLS certificate creation and renewals.
+    - `[mt-access]`: Security and environment validation results.
+    - `[mt]`: Component downloads, signature verification, and MetaTrader startup.
+    - `[mt-stop]`: Graceful shutdown and account state preservation.
+    - nginx request and authentication logs.
+    - Wine runtime output.
+- **Terminal output log:** Persisted across container restarts in `/config/log/mt/run-terminal.log` (`data/log/mt/` on host).
 
 ## Common problems
 
-- **A failed install step** shows a window on the desktop with the reason, counting down to the next try 60 s later, and the log has the details. A lost download, or a signature check that failed because a revocation list couldn't be fetched, usually passes on a later try. A file whose signature is wrong is never run.
-- **The first install stops at step 1, and the log has `wine: socket : Function not implemented`:** your Docker blocks a system call Wine needs. Every container runs under a seccomp profile, Docker's list of the system calls a container may make. The one in Docker 29.4.2 refuses `socketcall`, which 32-bit programs use to open a connection, and Wine's 32-bit programs need it to reach the Wine server. The window and the `ERROR` line say so. Update Docker: 29.4.3 and later allow the call again, and `docker version` shows which one you have.
-- **Python's step fails** (`MT_PYTHON=true`): during MetaTrader's first install, it's retried every 60 s like the other steps, and MetaTrader waits. Later, when you turn Python on for an account in use, or a new image brings a newer Python or packages, MetaTrader starts all the same: a window on the desktop says why, above MetaTrader until you close it, the log has a `WARNING` line with the reason, and the next start tries again. Behind a filter, allow the hosts in [What the container connects to](verify.md#what-the-container-connects-to), or remove `MT_PYTHON` to finish a first install without Python.
-- **The container keeps restarting:** the startup check refused a setting. The log's `[mt-access] REFUSED:` line says which (see [Refused](settings.md#refused)).
-- **Behind a proxy, the page loads but the desktop never appears:** the proxy probably replaces `Host`, and the container refuses the stream (see [What every proxy needs](access.md#what-every-proxy-needs)).
-- **More from Wine:** `WINEDEBUG=fixme-all`, or empty (see [Wine's own settings](settings.md#wines-own)).
+- **Failed installation step:** The desktop displays an error countdown window and retries every 60 seconds. Transient network timeouts or CRL lookup failures typically resolve on retry. Installers with invalid signatures are never run.
+- **Install fails at step 1 with `wine: socket : Function not implemented`:** Docker 29.4.2 seccomp profile blocks the `socketcall` syscall required by 32-bit Wine processes. Upgrade Docker to 29.4.3+ (check with `docker version`).
+- **Python provisioning fails (`MT_PYTHON=true`):** Retried every 60s during initial setup. On existing accounts or image upgrades, MetaTrader launches normally while displaying a desktop notification and logging a `WARNING`. If operating behind a firewall, ensure endpoints in [What the container connects to](verify.md#what-the-container-connects-to) are allowed.
+- **Container continuously restarts:** A configuration setting was rejected during startup validation. Inspect logs for `[mt-access] REFUSED:` (see [Refused](settings.md#refused)).
+- **Web page loads but desktop stream fails behind reverse proxy:** The proxy likely rewrote or dropped the `Host` header, triggering WebSocket origin rejection (see [What every proxy needs](access.md#what-every-proxy-needs)).
+- **Verbose Wine debug output:** Configure `WINEDEBUG` (see [Wine's own settings](settings.md#wines-own)).
 
-## Harmless messages at every start
+## Harmless startup messages
 
-From the desktop the image is built on:
+Normal base image initialization messages:
 
-- `17` and `18`: the sound server numbering the two audio devices it creates;
-- `_XSERVTransmkdir: Cannot create /tmp/.X11-unix with root ownership` and `screen 0 shmid 0`: the display starting as the desktop's user;
-- `xsettingsd: Unable to open connection to X server`, now and then: it started a moment before the display, and is started again;
-- `No hardware encoder … (nvenc)` and `Failed to init NVENC`: the stream looks for a GPU encoder, and without one encodes on the CPU;
-- `Apps panel enabled`: the panel stays hidden, and its actions are off.
+- `17` / `18`: PulseAudio device initialization indices.
+- `_XSERVTransmkdir: Cannot create /tmp/.X11-unix with root ownership` and `screen 0 shmid 0`: Xvfb running under non-root desktop user.
+- `xsettingsd: Unable to open connection to X server`: Benign race condition resolved automatically on immediate retry.
+- `No hardware encoder … (nvenc)`: Fallback to software CPU video encoding when no Nvidia GPU is present.
+- `Apps panel enabled`: Informational base desktop log; applications panel remains disabled.

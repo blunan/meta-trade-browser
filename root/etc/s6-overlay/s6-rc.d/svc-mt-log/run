@@ -1,9 +1,7 @@
 #!/usr/bin/with-contenv bash
 # shellcheck shell=bash
-# svc-mt-log: copies MetaTrader's log into docker logs. run-terminal.sh and the stop
-# hook write it, and it stays in /config across restarts, so it also keeps
-# what an earlier container wrote. Once per container start, it moves to
-# run-terminal.log.1 when it's over 1 MB.
+# svc-mt-log: Streams /config/log/mt/run-terminal.log to stdout (docker logs),
+# rotating logs >1 MB on container startup.
 set -euo pipefail
 
 log_file=/config/log/mt/run-terminal.log
@@ -15,7 +13,7 @@ if [[ ! -f "$offset_file" ]]; then
     s6-setuidgid abc mv -f "$log_file" "$log_file.1"
   fi
   s6-setuidgid abc touch "$log_file"
-  # docker logs gets only what this container start adds.
+  # Stream only logs produced since current container start.
   stat -c %s "$log_file" > "$offset_file"
 fi
 exec s6-setuidgid abc tail -c "+$(($(< "$offset_file") + 1))" -F "$log_file"

@@ -1,11 +1,7 @@
-# metatrader-docker's nginx site. init-mt-access renders it at every start, over
-# the base's site, and fills in the MT_* placeholders and the files in
-# /etc/nginx/mt/. Two servers: the desktop, HTTPS only, and the container's
-# health check, on a socket file. There is no plain-HTTP port.
+# Rendered at startup by init-mt-access. Configures HTTPS desktop access and
+# an internal healthcheck UNIX socket.
 
-# Requests from an address in TRUSTED_PROXIES get their X-Forwarded-For logged.
-# Nothing else uses that header, so the access checks below always judge the
-# connecting address.
+# Log X-Forwarded-For only when the client IP is in TRUSTED_PROXIES.
 geo $mt_trusted_proxy {
   default 0;
   include /etc/nginx/mt/trusted-proxies.geo;
@@ -29,9 +25,7 @@ server {
   auth_basic           "Login";
   auth_basic_user_file /etc/nginx/.htpasswd;
 
-  # On every response, errors included. No location adds headers of its own,
-  # because nginx would then drop these there. Only the desktop's own page may
-  # frame it: its file panel shows the file list in a frame.
+  # Security headers applied to all responses.
   add_header Content-Security-Policy "frame-ancestors 'self'" always;
   add_header X-Frame-Options "SAMEORIGIN" always;
   add_header X-Content-Type-Options "nosniff" always;
@@ -49,7 +43,7 @@ server {
     try_files $uri $uri/ =404;
   }
 
-  # Selkies, the stream included, on its socket file.
+  # Selkies streaming endpoint via UNIX socket.
   location MT_SUBFOLDERapi {
     proxy_set_header        Upgrade $http_upgrade;
     proxy_set_header        Connection "upgrade";
@@ -68,10 +62,7 @@ server {
   }
 }
 
-# The container's health check. A socket file, not a port: no certificate,
-# login or allowlist is involved, host networking doesn't share it, and
-# nothing outside the container can reach it. /healthz answers "ok" when
-# Selkies answers too, 500 when it doesn't.
+# Internal health check via UNIX socket. Bypasses TLS, auth, and network exposure.
 server {
   listen unix:/run/mt/health.sock;
   access_log off;
