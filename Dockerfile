@@ -139,8 +139,7 @@ EOF
 
 COPY root/ /
 
-# The window run-terminal.sh shows until MetaTrader starts (notice.py) uses the
-# base's GTK 3 from the system's Python. A base update that drops it fails here.
+# Validate GTK 3 availability and syntax for notice.py.
 RUN /usr/bin/python3 -I -c 'import gi; gi.require_version("Gtk", "3.0"); from gi.repository import Gtk' && \
     /usr/bin/python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' /opt/mt/notice.py
 

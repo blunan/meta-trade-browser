@@ -47,8 +47,8 @@ if [[ "$closed" == yes ]]; then
   tenths=$((($(now_us) - started) / 100000))
   log "MetaTrader closed in $((tenths / 10)).$((tenths % 10)) s"
 else
-  log "MetaTrader didn't close within $timeout_s s, so it stops unsaved with the container"
+  log "MetaTrader didn't close within $timeout_s s; stopping unsaved with container"
 fi
 if [[ "$saved" == yes ]] && s6-setuidgid abc mv -f "$accounts.mt-stop" "$accounts"; then
-  log "put back Config/accounts.dat from before the close, so that MetaTrader logs in by itself at the next start"
+  log "restored Config/accounts.dat from before shutdown for clean restart login"
 fi

@@ -1,12 +1,6 @@
-# A local build of the image, run with the example's settings, next to a real
-# deployment on the same machine: its own project name, container name, port,
-# folders and password, so nothing here touches the real one. On top of the
-# example:
+# Overlay compose configuration for local development and testing:
 #   docker compose -f compose.yaml -f tests/compose.dev.yaml build
-#   docker compose -f compose.yaml -f tests/compose.dev.yaml up -d
-# With MT_PYTHON=true in front of the second command, it installs Python too.
-# Paths are relative to the first file's folder, the repository's root.
-# mem_limit stays the example's 4g, so tests see what users get.
+#   [MT_PYTHON=true] docker compose -f compose.yaml -f tests/compose.dev.yaml up -d
 name: mt-dev
 
 services:
@@ -14,7 +8,7 @@ services:
     image: metatrader-docker:dev
     build: .
     container_name: metatrader-docker-dev
-    restart: "no"                              # a test run doesn't come back after a reboot
+    restart: "no"
     environment:
       TITLE: MetaTrader dev
       MT_PYTHON: ${MT_PYTHON:-}                # empty: off

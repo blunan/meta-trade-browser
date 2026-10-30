@@ -1,8 +1,5 @@
-# Builds the guide from docs/ and publishes it to GitHub Pages, at
-# https://metatrader-docker.blunan.com/ (the domain is set in the repository's Pages
-# settings, not in a CNAME file). Pull requests only build and check it.
-# "Docs build" is a required check, so it runs on every PR, in about 20 s.
-# There are no manual runs: the guide changes only through a merged PR.
+# Builds documentation from docs/ and publishes to GitHub Pages (https://metatrader-docker.blunan.com/).
+# Pull requests build and validate only.
 name: docs
 
 on:
@@ -18,7 +15,7 @@ on:
 
 permissions: {}
 
-# Deploys queue one after another; a PR's runs have their own group.
+# Sequential deployments; PR runs use isolated concurrency groups.
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('docs-{0}', github.ref) || 'pages' }}
   cancel-in-progress: false
@@ -41,7 +38,7 @@ jobs:
       - name: Install the locked packages
         run: pip install --require-hashes -r docs/requirements.txt
 
-      # The README shows compose.yaml inline; the guide includes the file itself.
+      # Validate inline compose.yaml in README.md matches compose.yaml
       - name: Check the README's compose.yaml against the file
         run: awk '/^```yaml$/ { f = 1; next } /^```$/ { if (f) exit } f' README.md | diff -u compose.yaml -
 

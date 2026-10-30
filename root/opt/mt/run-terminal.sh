@@ -24,7 +24,7 @@ python_dir="$WINEPREFIX/drive_c/Program Files/Python${python_series//./}"
 # Pinned requirements with hashes; updated via Renovate.
 python_requirements=/opt/mt/python-requirements.txt
 mt_url=https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe
-# The URL MetaQuotes' own Linux installer, mt5linux.sh, uses.
+# Pinned WebView2 bootstrapper URL used by MetaQuotes' mt5linux.sh installer.
 webview2_url=https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/f2910a1e-e5a6-4f17-b52d-7faf525d17f8/MicrosoftEdgeWebview2Setup.exe
 python_url="https://www.python.org/ftp/python/$python_version/python-$python_version-amd64.exe"
 # Match Wine Windows process path for terminal64.exe.
@@ -167,7 +167,7 @@ prepare_prefix() {
   local started=$SECONDS offset
   notice install "Step 1 of $steps: setting up Wine"
   if [[ -f "$WINEPREFIX/.mt5-installed" ]]; then
-    # Prefix already holds MetaTrader from an older image version.
+    # Prefix holds MetaTrader from a previous container run.
     log "step 1 of $steps: the Wine prefix already holds MetaTrader; keeping it as it is"
   else
     log "step 1 of $steps: creating the Wine prefix"

@@ -101,9 +101,7 @@ class Notice(Gtk.Window):
         self.set_resizable(False)
         self.set_position(Gtk.WindowPosition.CENTER)
         self.connect("delete-event", lambda *_: self.hide() or True)
-        # GTK centres the window without its title bar, and a new size keeps
-        # its top-left corner, so it's centred again whenever its frame or the
-        # screen changes size.
+        # Re-centre on window frame resize or display resolution change.
         self.centred = None
         self.connect("configure-event", self.on_configure)
         Gdk.Screen.get_default().connect("size-changed", lambda *_: self.centre())
@@ -150,7 +148,7 @@ class Notice(Gtk.Window):
     def read(self, fd, _condition):
         data = os.read(fd, 4096)
         if not data:
-            # run-terminal.sh closed its end: the last update stays.
+            # End of input stream: keep last status visible.
             return False
         self.input += data
         while b"\n" in self.input:
@@ -186,7 +184,7 @@ class Notice(Gtk.Window):
             )
 
     def show_state(self, heading, icon=False, detail=None, bar=False, note=None, above=False):
-        # Above MetaTrader's maximized window, or it would hide this one.
+        # Keep visible above maximized windows.
         self.set_keep_above(above)
         self.heading.set_text(heading)
         self.icon.set_visible(icon)
@@ -221,7 +219,7 @@ class Notice(Gtk.Window):
         self.centred = (frame.width, frame.height)
         display = Gdk.Display.get_default()
         area = (display.get_primary_monitor() or display.get_monitor(0)).get_geometry()
-        # Where the frame's top-left corner goes, title bar included.
+        # Position frame centrally on primary monitor.
         self.move(area.x + (area.width - frame.width) // 2, area.y + (area.height - frame.height) // 2)
 
     def pulse(self):

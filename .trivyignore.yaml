@@ -1,10 +1,6 @@
-# Trivy's exceptions for the image (image.yml passes --ignorefile). Each one is
-# narrow and says why; one that should go away gets an expiry date.
+# Trivy scan exceptions.
 secrets:
-  # Debian's "snakeoil" key pair, generated once when linuxserver built the
-  # base, so every copy of the base has the same one. Nothing uses it, and the
-  # image deletes it, but the base's layer still holds it. Secret scanning stays
-  # on for every other file.
+  # Unused Debian snakeoil key embedded in base image layer.
   - id: private-key
     paths:
       - "/etc/ssl/private/ssl-cert-snakeoil.key"

@@ -37,8 +37,7 @@ check() {
   fi
 }
 
-# listeners: the container's listening TCP and UDP sockets, as hexadecimal
-# address:port, without Docker's DNS server on 127.0.0.11 (as in tests/access.sh).
+# Return open TCP/UDP listening sockets (hexadecimal ip:port), excluding Docker DNS.
 listeners() {
   docker exec "$name" sh -c '
     for f in tcp tcp6; do awk "NR > 1 && \$4 == \"0A\" { print \$2 }" /proc/net/$f; done
@@ -49,8 +48,7 @@ listeners() {
 echo "Container: $name"
 check "listening sockets before a script attaches (only HTTPS on 3001)" "00000000:0BB9" "$(listeners)"
 
-# A script that attaches, says so, and stays attached for 20 s. Before
-# MetaTrader's first login, initialize() fails after about a minute.
+# Attach MetaTrader5 Python client and verify connection.
 docker exec -u abc "$name" wine python -I -c '
 import time
 import MetaTrader5 as mt5

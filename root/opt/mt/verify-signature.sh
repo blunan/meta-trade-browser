@@ -101,7 +101,7 @@ for attempt in 1 2 3; do
     break
   fi
   if (( attempt < 3 )); then
-    log "a revocation list couldn't be fetched; checking again in 5 s"
+    log "CRL fetch failed; retrying in 5 s"
     sleep 5
   fi
 done

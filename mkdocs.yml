@@ -1,5 +1,4 @@
-# The guide at https://metatrader-docker.blunan.com/, built by .github/workflows/docs.yml.
-# Preview it locally: see docs/building.md.
+# MkDocs configuration for https://metatrader-docker.blunan.com/.
 site_name: metatrader-docker
 site_description: MetaTrader in your browser, in a hardened container.
 site_url: https://metatrader-docker.blunan.com/
@@ -12,7 +11,7 @@ exclude_docs: |
 
 theme:
   name: material
-  font: false                                  # system fonts: no requests to Google Fonts
+  font: false                                  # system fonts (no Google Fonts requests)
   icon:
     repo: fontawesome/brands/github
   palette:

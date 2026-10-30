@@ -135,8 +135,7 @@ jobs:
         with:
           cosign-release: ${{ env.COSIGN_VERSION }}
 
-      # Never trivy-action or setup-trivy by tag: their tags were hijacked in
-      # March 2026. The release is checked against Trivy's own release workflow.
+      # Download Trivy binary directly and verify signature with Cosign.
       - name: Install Trivy, checked with cosign
         if: steps.changes.outputs.image == 'true'
         working-directory: ${{ runner.temp }}
@@ -184,7 +183,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Free disk space, if needed         # as in the test job
+      - name: Free disk space, if needed
         run: |
           if (( $(df --output=avail -BG / | tail -n 1 | tr -dc 0-9) < 30 )); then
             sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift
