@@ -2,9 +2,9 @@
 
 ## Pin a digest and check its signature
 
-An optional, advanced step: pin a digest and check its signature.
+Every published image is cryptographically signed keyless with Cosign via GitHub Actions. Only builds passing all automated tests and vulnerability scans are signed and tagged.
 
-A tag can move to another build; a digest (`sha256:…`) names exactly one. Every image this repository's CI builds is signed with cosign, keyless, by its GitHub Actions workflow. Only an image that passed the tests and the vulnerability scan is pushed, and it's signed before any tag points to it. To check one before you run it:
+Inspect and verify an image:
 
 ```sh
 docker buildx imagetools inspect ghcr.io/blunan/metatrader-docker:20261019.1
@@ -13,11 +13,11 @@ cosign verify ghcr.io/blunan/metatrader-docker@sha256:<digest> \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-The first command prints the digest. Then pin it in `compose.yaml` (or `docker run`): `ghcr.io/blunan/metatrader-docker:20261019.1@sha256:<digest>`. Docker uses the digest, and the tag stays only as a reminder.
+Pin the verified digest in `compose.yaml` (or `docker run`): `ghcr.io/blunan/metatrader-docker:20261019.1@sha256:<digest>`.
 
-## Its package list and build record
+## SBOM and build provenance
 
-Each image also carries a list of its packages (an SBOM) and a record of how it was built (its provenance):
+Inspect the Software Bill of Materials (SBOM) and SLSA build provenance:
 
 ```sh
 docker buildx imagetools inspect ghcr.io/blunan/metatrader-docker:latest --format '{{ json .SBOM }}'
@@ -26,24 +26,22 @@ docker buildx imagetools inspect ghcr.io/blunan/metatrader-docker:latest --forma
 
 ## What the container connects to
 
-For networks that filter outgoing traffic:
+For firewalls restricting outbound egress:
 
-| When | Host | What for |
+| Lifecycle | Endpoint | Purpose |
 |---|---|---|
-| First start | `msedge.sf.dl.delivery.mp.microsoft.com` | The WebView2 installer |
-| First start | `www.microsoft.com` | Revocation lists, for the WebView2 installer's signature check |
-| First start, then in the background | `config.edge.skype.com`, `msedge.api.cdp.microsoft.com`, `msedge.f.tlu.dl.delivery.mp.microsoft.com` | Edge Update, which installs WebView2 and keeps it current |
-| First start | `download.mql5.com` | The MetaTrader installer, and the files it installs |
-| First start | `crl3.digicert.com` | A revocation list, for the MetaTrader installer's signature check |
-| First start | `content.finteza.com` | MetaQuotes' analytics service, contacted by the MetaTrader installer |
-| When `MT_PYTHON=true` installs or upgrades Python | `www.python.org`, `www.microsoft.com` | The Windows Python installer, and revocation lists for its signature check |
-| When `MT_PYTHON=true` installs or upgrades Python or its packages | `pypi.org`, `files.pythonhosted.org` | The `MetaTrader5` and `numpy` packages |
-| From the first start on | `download.terminal.free` | LiveUpdate, MetaTrader's own updates |
-| Once you log in | your broker's servers | Trading, and LiveUpdate through them |
-| When you use them | MetaQuotes' MQL5 services | Market, Signals, Code Base and the like |
-
-That's what a first start looked up, with MetaTrader idle afterwards. Your broker, and the features you use, add their own hosts.
+| Initial boot | `msedge.sf.dl.delivery.mp.microsoft.com` | Microsoft Edge WebView2 installer |
+| Initial boot | `www.microsoft.com` | CRL revocation lists for Microsoft signature verification |
+| Initial boot & background | `config.edge.skype.com`, `msedge.api.cdp.microsoft.com`, `msedge.f.tlu.dl.delivery.mp.microsoft.com` | Edge Update service |
+| Initial boot | `download.mql5.com` | MetaTrader installer and binary components |
+| Initial boot | `crl3.digicert.com` | DigiCert CRL for MetaQuotes signature verification |
+| Initial boot | `content.finteza.com` | MetaQuotes installer telemetry endpoint |
+| With `MT_PYTHON=true` | `www.python.org`, `www.microsoft.com` | Python installer and CRL endpoints |
+| With `MT_PYTHON=true` | `pypi.org`, `files.pythonhosted.org` | PyPI package downloads (`MetaTrader5`, `numpy`) |
+| Ongoing | `download.terminal.free` | MetaTrader LiveUpdate |
+| Post-login | Broker access points | Market data, trade execution, broker LiveUpdate |
+| Interactive use | MetaQuotes MQL5 services | Market, Signals, and Code Base |
 
 ## MetaTrader's AI-agent servers
 
-MetaTrader and MetaEditor can run servers for AI agents (MCP) on the container's own loopback: MetaTrader on port 22346, and MetaEditor on 22345. They're protected only by an API key that MetaTrader keeps in `Config/assistant.ini`. In this image they're off at every start unless `MT_AI_AGENTS=true`; changing it takes a restart. With host networking, they would listen on the server's own loopback.
+MetaTrader and MetaEditor can run Model Context Protocol (MCP) servers on container loopback (MetaTrader: 22346, MetaEditor: 22345), protected by an API key stored in `Config/assistant.ini`. These servers are disabled by default and enabled only when `MT_AI_AGENTS=true`. With host networking, these ports bind directly to the server's loopback interface.

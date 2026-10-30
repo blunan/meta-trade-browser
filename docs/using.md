@@ -2,44 +2,43 @@
 
 ## Desktop, clipboard and sound
 
-- **The clipboard** works both ways. The browser asks for permission once.
-- **Sound:** MetaTrader's sounds, such as a finished backtest or an alert, play in the browser. The speaker button in the side panel turns them off. A browser may wait for your first click on the page before it plays any.
-- **The side panel** opens with Ctrl+Shift+M. With file transfers on, it has the file panel. It has no video or audio settings, and no microphone or webcam buttons.
+- **Clipboard:** Bidirectional synchronization (browser requests permission on first use).
+- **Sound:** MetaTrader audio events (order fills, alerts, backtest completion) stream to the browser. Toggle audio via the sidebar speaker icon. Note that modern browsers require an initial click on the page before playing sound.
+- **Sidebar:** Toggle with `Ctrl+Shift+M`. Hosts the file manager panel when file transfers are enabled.
 - **Keyboard shortcuts:**
-    - On Windows and Linux, the browser keeps Ctrl+N, Ctrl+T and Ctrl+W for itself. On macOS it passes them on to MetaTrader, since its own shortcuts use Cmd.
-    - F11 belongs to the browser.
+    - Windows and Linux browsers intercept `Ctrl+N`, `Ctrl+T`, `Ctrl+W`, and `F11`. macOS passes these shortcuts through because it uses `Cmd` for browser navigation.
 
 ## MetaEditor and trading protections
 
-- **MetaEditor** opens with F4 or MetaTrader's *IDE* button. The desktop's menu (right-click the desktop) has MetaTrader and MetaEditor, but MetaTrader usually covers the desktop.
-- **The MQL Wizard's first page** ignores the mouse under Wine. Use the keyboard: the arrow keys, Tab and Enter.
-- **After any manual login,** check the Algo Trading button. Switching accounts turns it off, if you ticked that protection in [step 6 of the quick start](quick-start.md#6-set-up-metatrader).
-- **Save your work in MetaEditor before stopping the container.** MetaTrader is asked to close and save when the container stops, but MetaEditor isn't: a "Save changes?" question would hold up the stop.
+- **MetaEditor:** Launch via `F4`, MetaTrader's *IDE* button, or the desktop right-click menu.
+- **MQL Wizard:** The first wizard step does not capture mouse input under Wine; navigate using arrow keys, `Tab`, and `Enter`.
+- **Algo Trading state:** Manual account switches automatically disable Algo Trading if the recommended protections in [quick start step 6](quick-start.md#6-set-up-metatrader) are enabled.
+- **Saving work:** Always save changes in MetaEditor before stopping the container. Container shutdown signals MetaTrader to save and exit, but does not prompt MetaEditor.
 
 ## HTML panes and memory
 
-- **The HTML panes:** Help (F1), Market, Signals, Mailbox messages and MetaEditor's Welcome page are web pages, shown through Microsoft Edge WebView2.
-    - They need memory. With one open, the container can reach 4 GB, and Market alone reaches the quick start's 4 GB limit.
-    - At the limit, the kernel stops one of Edge's processes first, not MetaTrader. The pane goes blank, and comes back when you close and reopen it. The log says when it happened.
-    - If you use the panes a lot, set `mem_limit: 6g` (`--memory 6g`).
-    - The MQL5 reference is also online, at <https://www.mql5.com/en/docs>.
-- **Memory sizing:** about 0.5 GB with MetaTrader running EAs and nobody connected, 1.5 GB with a browser connected, 2.4 GB during a heavy backtest, and up to 4 GB with an HTML pane open.
+- **WebView2 HTML panes:** Help (`F1`), Market, Signals, Mailbox, and MetaEditor Welcome tabs render through Microsoft Edge WebView2.
+    - These panes increase memory footprint. Market alone can push usage toward 4 GB.
+    - If the container hits its memory limit, the background OOM helper prioritizes stopping Edge renderer processes over MetaTrader. If a pane goes blank, close and reopen it.
+    - For regular browsing of Market or Help, set `mem_limit: 6g` (`--memory 6g`).
+    - The MQL5 reference is also available online at <https://www.mql5.com/en/docs>.
+- **Typical memory footprint:** ~0.5 GB idle/headless, ~1.5 GB connected with charts/EAs, ~2.4 GB during backtests, up to 4 GB with HTML panes open.
 
 ## Python
 
-With `MT_PYTHON=true` (see [Folders and settings](settings.md#the-main-settings)), the next start installs Windows Python 3.14 and MetaQuotes' [`MetaTrader5` package](https://www.mql5.com/en/docs/python_metatrader5) into `/config`. It downloads Python's 64-bit installer from python.org, and runs it only if the Python Software Foundation's signature checks out. Then pip installs `MetaTrader5`, and `numpy`, the one package it needs, from PyPI. Those have no signature to check, so the image lists the version of each with the SHA-256 hashes of its files, and pip installs a file only if its hash is on that list. This takes under a minute, and adds about 130 MB to `/config`. MetaTrader and MetaEditor find Python by themselves: MetaEditor shows its folder under **Tools → Options → Compilers**.
+Setting `MT_PYTHON=true` (see [Folders and settings](settings.md#the-main-settings)) installs Windows Python 3.14 and the verified [`MetaTrader5` package](https://www.mql5.com/en/docs/python_metatrader5) (plus `numpy`) into `/config` (~130 MB, takes <1 min). The installer Authenticode signature and wheel SHA-256 hashes are verified before installation. MetaTrader and MetaEditor automatically configure the interpreter path under **Tools → Options → Compilers**.
 
-- **On a chart:** a `.py` script in `MQL5/Scripts`, or in the EA folder's `Scripts` (*Scripts → Mounted* in the Navigator), runs on a chart when you double-click it or drag it onto one (Enter or *Modify* opens it in MetaEditor). What it prints appears in the Toolbox's *Experts* tab.
-- **What a script can do:** a `.py` script runs as an ordinary program, with everything MetaTrader itself can reach: the files in `/config` and the EA folder, the network, and other programs. MetaTrader's limits for MQL5 programs, such as **Allow DLL imports** and the **WebRequest** list, don't apply to it. Run only scripts you'd run on your own computer.
-- **The `MetaTrader5` package** connects to MetaTrader once MetaTrader has logged in to a trading account. Before the first login, `initialize()` fails with `(-10005, 'IPC timeout')`.
-- **Trading from Python:** with the quick start's [step 6](quick-start.md#6-set-up-metatrader) settings, **Disable algorithmic trading via external Python API** is on. Scripts, on a chart or through `docker exec`, can read prices and the account, but `order_send` is refused with `10027` (*AutoTrading disabled by client*), as when Algo Trading is off. Untick that option, with **Allow algorithmic trading** on, when a script needs to trade.
-- **From `docker exec`:** to run Python, or to install another package into `/config`:
+- **Running scripts on charts:** Drag or double-click `.py` files located in `MQL5/Scripts` or `/mql5/Scripts` (*Scripts → Mounted* in Navigator). Console output appears in the Toolbox *Experts* tab.
+- **Permissions:** Python scripts execute natively under Wine with full access to container files and network. Standard MQL5 sandbox limits (**Allow DLL imports**, **WebRequest** whitelist) do not apply.
+- **IPC connection:** `MetaTrader5.initialize()` connects over local IPC once MetaTrader has logged into an account. Calling it before initial login returns `(-10005, 'IPC timeout')`.
+- **Algo trading flag:** When **Disable algorithmic trading via external Python API** is enabled ([quick start step 6](quick-start.md#6-set-up-metatrader)), scripts can read market and account data, but `order_send` fails with `10027` (*AutoTrading disabled by client*). Uncheck this option and enable **Allow algorithmic trading** to permit orders.
+- **Container CLI (`docker exec`):**
 
     ```sh
     docker exec -u abc metatrader-docker wine python -c "import MetaTrader5 as mt5; print(mt5.initialize(), mt5.version()); mt5.shutdown()"
     docker exec -u abc metatrader-docker wine python -m pip install --only-binary=:all: pandas
     ```
 
-- **Updates:** a new image with a newer Python 3.14 release upgrades Python at its first start, and one with newer package versions installs them. Going back to an older image keeps the newer Python, and puts back that image's packages. For a newer `MetaTrader5` before an image brings it: `docker exec -u abc metatrader-docker wine python -m pip install --upgrade --only-binary=:all: MetaTrader5`. That one isn't checked against the image's list, and stays until an image with another list replaces it.
-- **If Python can't be installed:** during MetaTrader's first install, MetaTrader waits for it, as for the other steps: the window says why, and tries again 60 s later. Later on, when you turn `MT_PYTHON` on for an account in use, or a new image brings a newer Python or packages, MetaTrader starts all the same: a window on the desktop says why, above MetaTrader until you close it, the log has a `WARNING` line with the reason, and the next start tries again.
-- **Turning it off** leaves Python in `/config`, and stops its upgrades. MetaTrader and MetaEditor still find it, and the startup log says so at each start.
+- **Upgrades:** Newer image releases automatically upgrade Python or dependency wheels in `/config`. Reverting to an earlier image preserves newer Python versions and restores older pinned wheels.
+- **Installation failures:** If Python provisioning fails during initial setup, setup pauses with an error dialog and retries every 60s. On existing setups, MetaTrader still launches and displays a persistent desktop notification.
+- **Disabling:** Setting `MT_PYTHON=false` leaves existing Python files in `/config` but halts automatic upgrades.

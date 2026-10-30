@@ -1,39 +1,39 @@
 # metatrader-docker
 
-MetaTrader in your browser. The MetaTrader terminal and MetaEditor run on a small Linux desktop inside a container, and you use them from any browser as you would on your own computer: charts, Expert Advisors (EAs, the MQL5 programs that trade from a chart), MetaEditor and the Strategy Tester. One container runs one trading account.
+MetaTrader in your browser. Run the MetaTrader 5 terminal and MetaEditor in a lightweight Linux desktop container accessible from any browser: charts, Expert Advisors (EAs), MetaEditor, and Strategy Tester. One container runs one trading account.
 
-It installs MetaTrader 5, MetaQuotes' current release, and runs it under WineHQ staging (Wine runs Windows programs on Linux) on [linuxserver.io's Selkies desktop](https://github.com/linuxserver/docker-baseimage-selkies), Debian 13. It's secure by default:
+Runs under WineHQ staging on [linuxserver.io's Selkies desktop](https://github.com/linuxserver/docker-baseimage-selkies) (Debian 13). Secure defaults include:
 
-- a password is required, and the desktop is served over HTTPS only;
-- Docker publishes it on the server's loopback address, `127.0.0.1`, unless you choose another;
-- other websites can't open your desktop's stream or embed its page;
-- the desktop has no terminal and no `sudo`;
-- MetaQuotes' installer and Microsoft's WebView2 installer are downloaded at the first start, and run only if their code signatures check out; so is Python's, if you turn it on. The image itself contains no MetaQuotes or Microsoft software.
+- Required password authentication, served exclusively over HTTPS.
+- Published to loopback (`127.0.0.1`) by default.
+- Strict origin controls preventing external streaming or framing.
+- Hardened desktop environment without terminal access or `sudo`.
+- Authenticode signature verification on initial downloads (MetaQuotes, Edge WebView2, optional Python). Base image contains no proprietary binaries.
 
-Not affiliated with MetaQuotes or Microsoft.
+Not affiliated with or endorsed by MetaQuotes or Microsoft.
 
 ## What you need
 
-- A Linux server with Docker Engine, on amd64 (x86-64). MetaTrader is a 64-bit Windows program, and there's no ARM build. Docker Compose v2 is optional: `docker run` works too.
-- About 4 GB of memory, and about 5 GB of disk once MetaTrader has run for a while. The image itself takes about 4 GB.
-- A way to reach the server: SSH is enough.
+- **System:** Linux host on amd64 (x86-64) with Docker Engine (Compose v2 optional). MetaTrader is 64-bit Windows software without ARM support.
+- **Resources:** ~4 GB RAM and ~5–10 GB disk space (~4 GB base image + runtime data).
+- **Access:** SSH or local console access to the host.
 
-Then follow the [quick start](quick-start.md).
+Follow the [quick start](quick-start.md) to begin.
 
 ## What isn't supported
 
-- **ARM.** MetaTrader is a 64-bit Windows program, so the image is amd64 only.
-- **VNC.** The desktop streams to browsers only. VNC would mean a second login and a second open port.
-- **Microphone and webcam.** They're off, and untested with MetaTrader.
-- **A Python network bridge.** With `MT_PYTHON=true`, Windows Python and MetaQuotes' `MetaTrader5` package are installed inside the container so `.py` scripts run on charts or through `docker exec` (see [Python](using.md#python)), but nothing exposes the Python API over the network. Selkies, the desktop's streaming server, is itself a Python program; it listens only on a socket file inside the container.
-- **`init: true`, or `docker run --init`.** The image's own supervisor (s6) has to be process 1: with Docker's init, the container stops at once.
-- **EAs that need .NET.** Wine's Mono isn't included.
-- **Wayland and WebRTC.** The desktop runs X11 and streams over WebSockets; the startup check refuses the alternatives.
+- **ARM architecture:** MetaTrader 5 is a 64-bit x86 Windows binary; amd64 only.
+- **VNC:** The desktop streams via WebSockets to browsers only.
+- **Microphone and webcam:** Disabled by default.
+- **Remote Python bridge:** `MT_PYTHON=true` provides Python and `MetaTrader5` locally inside the container (on charts or via `docker exec`), but does not expose an external network API.
+- **`init: true` / `--init`:** The container requires its built-in s6 supervisor as process 1.
+- **.NET-dependent EAs:** Wine Mono is not included.
+- **Wayland / WebRTC:** The desktop runs X11 and WebSockets; alternative modes are refused at startup.
 
 ## License
 
 Copyright (C) 2026 Brayan Luna
 
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 3. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See [LICENSE](https://github.com/blunan/metatrader-docker/blob/main/LICENSE) for the full text.
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 3. It is distributed in the hope it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See [LICENSE](https://github.com/blunan/metatrader-docker/blob/main/LICENSE) for the full text.
 
-The image is built on [linuxserver.io's](https://www.linuxserver.io/) Selkies base image, also GPL-3.0. At the first start it downloads MetaQuotes' MetaTrader 5 and Microsoft's Edge WebView2 Runtime from their publishers. With `MT_PYTHON=true` it also downloads Python from python.org, and the `MetaTrader5` and `numpy` packages from PyPI. They come under their own license terms, not this project's. This project isn't affiliated with or endorsed by MetaQuotes or Microsoft.
+Built on [linuxserver.io's](https://www.linuxserver.io/) Selkies base image (GPL-3.0). During initial setup, the container downloads MetaTrader 5 and Edge WebView2 Runtime from their respective publishers (and Python / packages if `MT_PYTHON=true`). These components are subject to their own license terms. Not affiliated with or endorsed by MetaQuotes or Microsoft.

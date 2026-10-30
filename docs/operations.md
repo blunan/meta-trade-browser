@@ -2,35 +2,34 @@
 
 ## Stopping and restarts
 
-- **Stopping:** `docker compose stop`, or `docker stop metatrader-docker`. MetaTrader gets a close request, as *File → Exit* sends, and saves its charts and settings; this usually takes about a second. The quick start's 30 s (`stop_grace_period`, `--stop-timeout`) gives it the time.
-- **At every stop with a saved login, the log says the account file was put back:** "put back Config/accounts.dat from before the close". Under Wine, the copy of `accounts.dat` that MetaTrader writes while closing doesn't survive a container restart. At the next start MetaTrader would log "Accounts deleted due security reason" and not log in. So the copy from before the close is kept.
-- **If MetaTrader closes or crashes,** the desktop starts it again within seconds.
+- **Stopping:** Run `docker compose stop` or `docker stop metatrader-docker`. The shutdown hook sends a graceful exit signal (like *File → Exit*), allowing MetaTrader up to 20s to persist charts and parameters before the container stops (configured via `stop_grace_period: 30s` / `--stop-timeout 30`).
+- **Account credential restoration:** During shutdown, the container backs up `Config/accounts.dat` before MetaTrader closes and restores it immediately afterward. Under Wine, MetaTrader's shutdown rewrite of this file can trigger "Accounts deleted due security reason" on subsequent boots.
+- **Auto-restart:** If MetaTrader closes or crashes during normal operation, the container watchdog restarts it automatically within seconds.
 
 ## Health check
 
-`docker ps` shows *healthy* when MetaTrader is running and the desktop answers.
+`docker ps` indicates `healthy` once MetaTrader is running and the internal desktop server responds.
 
-- It doesn't show whether MetaTrader is connected to the broker, or whether an EA is running. MetaTrader's status bar and its Journal show that.
-- `docker inspect --format '{{range .State.Health.Log}}{{.Output}}{{end}}' metatrader-docker` shows why a check failed.
-- The first start has 5 minutes before failed checks count.
+- Does not indicate broker connection status or EA execution (inspect MetaTrader's status bar and Journal tab for trading state).
+- View health check output: `docker inspect --format '{{range .State.Health.Log}}{{.Output}}{{end}}' metatrader-docker`.
+- Container healthchecks have a 5-minute start period to accommodate initial provisioning.
 
 ## Stopping trading in a hurry
 
-From mildest to strongest:
+From mildest to most disruptive:
 
-1. Click **Algo Trading** in the terminal. No EA can trade, and positions stay open.
-2. `docker stop metatrader-docker`. The terminal stops. Open positions keep their stop-loss and take-profit on the broker's server.
-3. Close positions by hand, on the desktop or in your broker's app, then stop.
+1. Click **Algo Trading** in the MetaTrader toolbar (halts EA execution; leaves open positions intact).
+2. Stop the container: `docker stop metatrader-docker` (MetaTrader halts; broker retains server-side SL/TP orders).
+3. Manually close positions in MetaTrader or your broker's mobile/web app, then stop the container.
 
 ## Updating the image
 
-- **Tags:**
-    - `latest` follows every new build;
-    - a date tag, such as `20261019.1`, stays on one build. A second build that day gets `20261019.2`. Every date tag has this form, so update tools that compare tags, such as WUD, offer each newer one;
-    - `sha-<commit>` names the first build of that source commit.
-- **New builds** come with every change to the image, including updates of the base image it's built on, which also bring Debian's fixes.
-- **Going back:** use the previous date tag in place of `latest`, the same way.
-- **Python,** with `MT_PYTHON=true` (see [Python](using.md#python)): a new image that brings a newer Python 3.14 release, or newer packages, upgrades them at its first start. Going back to an older image keeps the newer Python, and puts back that image's packages.
+- **Image tags:**
+    - `latest`: Tracks the most recent automated build.
+    - Date tags (e.g. `20261019.1`): Pinned daily releases formatted for container update tools (e.g. WUD). Subsequent builds on the same date append `.2`, etc.
+    - Commit tags (`sha-<commit>`): Specific git commit builds.
+- **Rollbacks:** Pin the previous date tag instead of `latest`.
+- **Python environments (`MT_PYTHON=true`):** Updated images automatically upgrade Python and pinned wheels in `/config` on boot. Rolling back restores previous pinned wheels while preserving newer Python binaries.
 
 To update:
 
@@ -47,14 +46,13 @@ To update:
     docker stop metatrader-docker && docker rm metatrader-docker
     ```
 
-    Then the same `docker run` as in the [quick start](quick-start.md#4-start-it).
+    Followed by the `docker run` command from the [quick start](quick-start.md#4-start-it).
 
 ## Updates inside the container
 
-Two things update themselves, whatever the image:
+Two internal components update independently of the Docker image:
 
-- **MetaTrader, through LiveUpdate.**
-    - When *Welcome to LiveUpdate* says updates have been downloaded, click *Restart* at a quiet moment. *Later* installs them at the next start.
-    - MetaQuotes says LiveUpdate can't be turned off. It also brings MetaQuotes' machine-learning and AI components.
-    - A new MetaTrader build could misbehave under Wine. Keep backups of `/config` to go back to.
-- **WebView2, through Edge Update,** which keeps running in the background.
+- **MetaTrader LiveUpdate:**
+    - When *Welcome to LiveUpdate* indicates updates are ready, restart at a convenient time. LiveUpdate cannot be disabled in MetaTrader.
+    - Always maintain backups of `/config` to protect against upstream regressions.
+- **Microsoft Edge WebView2:** Edge Update runs in the background and applies runtime updates automatically.

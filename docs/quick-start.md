@@ -1,6 +1,6 @@
 # Quick start
 
-You need a Linux server with Docker Engine on amd64 (x86-64), about 4 GB of memory and 10 GB of disk, and SSH access (see [What you need](index.md#what-you-need)).
+You need a Linux server with Docker Engine on amd64 (x86-64), ~4 GB RAM, ~10 GB disk space, and SSH access (see [What you need](index.md#what-you-need)).
 
 ## 1. Create the folders
 
@@ -12,9 +12,9 @@ mkdir -p -m 700 data secrets
 mkdir -p ea
 ```
 
-`data` will hold your saved broker logins, so only you may open it. `ea` is the optional EA folder.
+`data` stores saved broker credentials (keep mode `0700`); `ea` is the optional directory for custom EAs/scripts.
 
-The container works as user and group `1000`. Check yours with `id -u` and `id -g`: if either prints another number, add `PUID` and `PGID` under `environment` in `compose.yaml` (or `-e PUID=$(id -u) -e PGID=$(id -g)` in `docker run`; see [Folders and settings](settings.md#the-main-settings)).
+The container runs as UID/GID `1000`. If `id -u` or `id -g` returns another value, set `PUID` and `PGID` under `environment` in `compose.yaml` (or `-e PUID=$(id -u) -e PGID=$(id -g)` in `docker run`; see [Folders and settings](settings.md#the-main-settings)).
 
 ## 2. Create the desktop password
 
@@ -23,29 +23,29 @@ openssl rand -base64 24 | tr -d '\n' > secrets/password
 cat secrets/password; echo
 ```
 
-Keep the password in your password manager. A password of your own works too: one line, at least 12 characters. Then make the file root's, so nothing inside the desktop can read it:
+Save the password in your password manager (or use your own single-line password, minimum 12 characters). Restrict read permissions to root:
 
 ```sh
 sudo chown root:root secrets/password
 sudo chmod 0400 secrets/password
 ```
 
-From then on, `sudo cat secrets/password` shows the password.
+Use `sudo cat secrets/password` to view it later.
 
 ## 3. Save `compose.yaml`
 
-Save this as `compose.yaml` in the same folder. It's also [in the repository](https://github.com/blunan/metatrader-docker/blob/main/compose.yaml). Without Compose, skip this step: the next one has the same container as a `docker run` command.
+Save as `compose.yaml` in the same directory (also [in the repository](https://github.com/blunan/metatrader-docker/blob/main/compose.yaml)). If using `docker run`, skip to step 4.
 
 ```yaml
 --8<-- "compose.yaml"
 ```
 
 !!! warning "Never add `init: true`"
-    The image's own supervisor has to be process 1. With Docker's init (`init: true`, or `docker run --init`), the container stops at once.
+    The container requires its built-in s6 supervisor as process 1. Enabling Docker's init halts the container immediately.
 
 ## 4. Start it
 
-Start it and follow its log:
+Start the container and follow the logs:
 
 === "Compose"
 
@@ -72,10 +72,10 @@ Start it and follow its log:
     docker logs -f metatrader-docker
     ```
 
-The first start installs Microsoft Edge WebView2 and MetaTrader. It takes about 2–3 minutes, and it's done when the log says `starting MetaTrader`. Ctrl+C stops following the log; the container keeps running.
+Initial provisioning downloads and installs WebView2 and MetaTrader (~2–3 minutes). The container is ready when logs show `starting MetaTrader`. Press `Ctrl+C` to detach from logs.
 
 !!! tip "On a shared server"
-    Also cap the container's processes and logs.
+    Cap container processes and log file growth:
 
     === "Compose"
 
@@ -92,30 +92,30 @@ The first start installs Microsoft Edge WebView2 and MetaTrader. It takes about 
 
 ## 5. Open the desktop
 
-On your own computer, open an SSH tunnel to the server and leave it open:
+On your workstation, establish an SSH tunnel to the server:
 
 ```sh
 ssh -N -L 3001:127.0.0.1:3001 you@your-server
 ```
 
-Then browse to `https://localhost:3001`. The browser warns about the certificate, because the container made its own; accept it. Sign in as `trader` with the password. While MetaTrader is still installing, the desktop shows an *Installing MetaTrader* window with the step it's on.
+Browse to `https://localhost:3001`, accept the self-signed certificate warning, and sign in as `trader` with your password. If installation is in progress, a desktop status window displays current setup steps.
 
-To stop the warning for good, trust that certificate on your computer: copy `data/ssl/cert.pem` from the server, and add it to your trusted certificates (on macOS, open it in Keychain Access and set it to *Always Trust*). It's issued to `localhost` and `127.0.0.1` only, and it can't vouch for any other site. The container renews it about every two years, when it needs trusting again.
+To eliminate browser warnings, trust the certificate locally: copy `data/ssl/cert.pem` to your workstation and import it into your system certificate trust store (valid only for `localhost` and `127.0.0.1`; automatically renewed every ~825 days).
 
-Other ways in, such as a VPN, Tailscale or your own domain behind a reverse proxy, are in [Access and reverse proxy](access.md).
+For remote access options (VPN, Tailscale, or reverse proxies), see [Access and reverse proxy](access.md).
 
 ## 6. Set up MetaTrader
 
-1. Log in to your trading account with *Save password* ticked.
-2. If *Welcome to LiveUpdate* says updates have been downloaded, click *Restart*.
+1. Log in to your trading account with *Save password* checked.
+2. If *Welcome to LiveUpdate* indicates updates were downloaded, click *Restart*.
 3. Under **Tools → Options → Experts**:
     - **Allow algorithmic trading:** on.
     - **Disable algorithmic trading when the account has been changed:** on.
     - **Disable algorithmic trading when the profile has been changed:** on.
     - **Disable algorithmic trading when the charts symbol or period has been changed:** on.
-    - **Disable algorithmic trading via external Python API:** on, unless you enabled `MT_PYTHON=true` and want Python scripts to place orders (see [Python](using.md#python)).
-    - **Allow DLL imports:** off, unless an EA needs it.
-    - **Allow WebRequest for listed URL:** off, unless an EA needs it.
-4. To keep memory and traffic down: **Charts → Max bars in chart:** 50000, and **Server → Enable news:** off.
+    - **Disable algorithmic trading via external Python API:** on, unless using `MT_PYTHON=true` for Python trading scripts (see [Python](using.md#python)).
+    - **Allow DLL imports:** off, unless explicitly required by an EA.
+    - **Allow WebRequest for listed URL:** off, unless explicitly required by an EA.
+4. To reduce memory and network usage: **Charts → Max bars in chart:** 50000, and **Server → Enable news:** off.
 
 Next: [Using MetaTrader](using.md) in the browser.
